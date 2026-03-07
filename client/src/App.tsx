@@ -1,0 +1,54 @@
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import NotFound from "@/pages/NotFound";
+import GoogleOAuthCallback from "@/pages/GoogleOAuthCallback";
+import Dashboard from "@/pages/Dashboard";
+import ProfileAnalysis from "@/pages/ProfileAnalysis";
+import AIChatPage from "@/pages/AIChatPage";
+import PerformanceCharts from "@/pages/PerformanceCharts";
+import CompetitorComparison from "@/pages/CompetitorComparison";
+import Checklist from "@/pages/Checklist";
+import ReviewResponder from "@/pages/ReviewResponder";
+import PostGenerator from "@/pages/PostGenerator";
+import KeywordAnalyzer from "@/pages/KeywordAnalyzer";
+import ActivityMonitor from "@/pages/ActivityMonitor";
+import { Route, Switch } from "wouter";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { ThemeProvider } from "./contexts/ThemeContext";
+import Home from "./pages/Home";
+
+function Router() {
+  return (
+    <Switch>
+      <Route path="/" component={Home} />
+      <Route path="/api/oauth/google/callback" component={GoogleOAuthCallback} />
+      <Route path="/dashboard" component={Dashboard} />
+      <Route path="/checklist" component={Checklist} />
+      <Route path="/profile/:id" component={ProfileAnalysis} />
+      <Route path="/profile/:profileId/chat" component={AIChatPage} />
+      <Route path="/profile/:profileId/charts" component={PerformanceCharts} />
+      <Route path="/profile/:profileId/competitors" component={CompetitorComparison} />
+      <Route path="/profile/:profileId/reviews" component={ReviewResponder} />
+      <Route path="/profile/:profileId/posts" component={PostGenerator} />
+      <Route path="/profile/:profileId/keywords" component={KeywordAnalyzer} />
+      <Route path="/profile/:profileId/activity" component={ActivityMonitor} />
+      <Route path="/404" component={NotFound} />
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <ThemeProvider defaultTheme="light">
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
+  );
+}
+
+export default App;

@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1772483295971,
+      "tag": "0000_many_power_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1772483380988,
+      "tag": "0001_bizarre_rachel_grey",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1772501238973,
+      "tag": "0002_sparkling_lightspeed",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1772552245888,
+      "tag": "0003_salty_shinko_yamashiro",
+      "breakpoints": true
+    }
+  ]
+}
