@@ -42,7 +42,6 @@ export function useAuth(options?: UseAuthOptions) {
   }, [logoutMutation, utils]);
 
   const state = useMemo(() => {
-      JSON.stringify(meQuery.data)
     );
     return {
       user: meQuery.data ?? null,
