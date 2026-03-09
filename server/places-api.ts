@@ -31,31 +31,41 @@ export interface PlaceReview {
 
 /** Busca place_id a partir de URL do Google Maps ou nome */
 export async function findPlaceFromUrl(input: string): Promise<string | null> {
+  let fullUrl = input;
+
+  // Expande URL encurtada (maps.app.goo.gl ou goo.gl)
+  if (input.includes("goo.gl") || input.includes("maps.app.goo.gl")) {
+    try {
+      const res = await fetch(input, { method: "GET", redirect: "follow" });
+      fullUrl = res.url;
+    } catch {
+      fullUrl = input;
+    }
+  }
+
   // Extrai place_id direto da URL se disponível
-  const placeIdMatch = input.match(/place_id[=:]([A-Za-z0-9_-]+)/);
+  const placeIdMatch = fullUrl.match(/place_id[=!:]([A-Za-z0-9_-]+)/);
   if (placeIdMatch) return placeIdMatch[1];
 
-  // Extrai nome do negócio da URL
+  // Extrai nome do negócio da URL expandida
   let searchQuery = "";
+  let lat: number | undefined, lng: number | undefined;
   try {
-    const u = new URL(input);
+    const u = new URL(fullUrl);
     const placeMatch = u.pathname.match(/\/maps\/place\/([^/@]+)/);
     if (placeMatch) {
       searchQuery = decodeURIComponent(placeMatch[1].replace(/\+/g, " "));
     } else {
       searchQuery = u.searchParams.get("q") || u.searchParams.get("query") || "";
     }
-    // Pega também coordenadas se disponíveis para melhorar busca
-    const coordMatch = u.pathname.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-    if (coordMatch && searchQuery) {
-      return await findPlaceByText(searchQuery, parseFloat(coordMatch[1]), parseFloat(coordMatch[2]));
-    }
+    const coordMatch = fullUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (coordMatch) { lat = parseFloat(coordMatch[1]); lng = parseFloat(coordMatch[2]); }
   } catch {
     searchQuery = input;
   }
 
   if (!searchQuery) return null;
-  return await findPlaceByText(searchQuery);
+  return await findPlaceByText(searchQuery, lat, lng);
 }
 
 async function findPlaceByText(query: string, lat?: number, lng?: number): Promise<string | null> {
