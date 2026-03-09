@@ -34,6 +34,17 @@ async function startServer() {
   registerLoginRoute(app);
   registerOAuthRoutes(app);
 
+  // Rota de teste da Places API
+  app.get("/api/test-places", async (req: any, res: any) => {
+    const key = process.env.GOOGLE_PLACES_API_KEY;
+    if (!key) return res.json({ error: "GOOGLE_PLACES_API_KEY não definida" });
+    const query = (req.query.q as string) || "Pizzaria";
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&key=${key}&language=pt-BR`;
+    const r = await fetch(url);
+    const data = await r.json();
+    res.json({ status: data.status, count: data.results?.length, first: data.results?.[0]?.name, error_message: data.error_message });
+  });
+
   // tRPC API
   app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
 
