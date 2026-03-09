@@ -7,8 +7,19 @@ import * as db from "./db";
 import { callGroqAPI } from "./groq";
 import { reviewsRouter, generateResponseProcedure } from "./reviews-router";
 import { getGoogleOAuthUrl, refreshAccessToken } from "./google-oauth-tokens";
+import { findPlaceFromUrl, getPlaceDetails, getNearbyCompetitors, getCompetitorDetails } from "./places-api";
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
+
+function extractKeywords(text: string): string[] {
+  const stopWords = new Set(["de", "da", "do", "em", "a", "o", "e", "que", "com", "para", "um", "uma", "os", "as", "se", "na", "no", "ao", "por", "foi", "são", "mais", "muito", "bem", "mas", "ou", "me", "meu", "sua", "seu"]);
+  const words = text.toLowerCase().replace(/[^a-záéíóúãõâêôç\s]/g, " ").split(/\s+/);
+  const freq: Record<string, number> = {};
+  for (const w of words) {
+    if (w.length > 3 && !stopWords.has(w)) freq[w] = (freq[w] || 0) + 1;
+  }
+  return Object.entries(freq).sort((a, b) => b[1] - a[1]).map(([w]) => w);
+}
 
 function calcScore(p: {
   totalReviews?: number | null;
@@ -92,6 +103,38 @@ export const appRouter = router({
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => db.getProfileById(input.id)),
+
+    extractFromUrl: protectedProcedure
+      .input(z.object({ url: z.string() }))
+      .mutation(async ({ input }) => {
+        if (!process.env.GOOGLE_PLACES_API_KEY) {
+          throw new Error("GOOGLE_PLACES_API_KEY não configurada no servidor");
+        }
+        const placeId = await findPlaceFromUrl(input.url);
+        if (!placeId) throw new Error("Não foi possível encontrar este negócio no Google. Verifique o link ou tente pelo nome.");
+
+        const details = await getPlaceDetails(placeId);
+        if (!details) throw new Error("Negócio encontrado mas não foi possível buscar os detalhes.");
+
+        // Mapeia tipos do Google para categoria legível
+        const categoryMap: Record<string, string> = {
+          restaurant: "Restaurante", gym: "Academia", hospital: "Hospital",
+          dentist: "Clínica Odontológica", pharmacy: "Farmácia", lodging: "Hotel/Pousada",
+          supermarket: "Supermercado", store: "Loja", beauty_salon: "Salão de Beleza",
+          lawyer: "Escritório de Advocacia", accounting: "Contabilidade", school: "Escola",
+          bar: "Bar", cafe: "Cafeteria", bakery: "Padaria", car_repair: "Oficina Mecânica",
+          clothing_store: "Loja de Roupas", electronics_store: "Loja de Eletrônicos",
+          hair_care: "Cabeleireiro", real_estate_agency: "Imobiliária",
+          travel_agency: "Agência de Viagens", veterinary_care: "Clínica Veterinária",
+        };
+
+        const category = categoryMap[details.category] || details.category?.replace(/_/g, " ") || "Negócio";
+
+        return {
+          ...details,
+          category,
+        };
+      }),
 
     create: protectedProcedure
       .input(z.object({
@@ -225,6 +268,89 @@ Perfil analisado:
     getByProfile: protectedProcedure
       .input(z.object({ profileId: z.number() }))
       .query(async ({ input }) => db.getCompetitorsByProfileId(input.profileId)),
+
+    fetchReal: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        if (!profile.latitude || !profile.longitude) {
+          throw new Error("Perfil sem coordenadas. Reimporte o perfil pelo link do Google Maps.");
+        }
+
+        // Busca concorrentes reais via Places API
+        const nearby = await getNearbyCompetitors(
+          profile.latitude, profile.longitude,
+          profile.category, profile.googleLocationId
+        );
+
+        if (nearby.length === 0) return { competitors: [], message: "Nenhum concorrente encontrado próximo." };
+
+        // Busca detalhes com avaliações
+        const details = await getCompetitorDetails(nearby.map(c => c.placeId));
+
+        // Salva no banco
+        for (const comp of details) {
+          try {
+            await db.createCompetitor({
+              profileId: input.profileId,
+              placeId: comp.placeId,
+              name: comp.name,
+              address: comp.address,
+              rating: comp.rating,
+              reviewCount: comp.totalReviews,
+              category: comp.category,
+            });
+          } catch (e: any) {
+            if (!e?.message?.includes("Duplicate")) console.warn("[Competitors] insert error:", e);
+          }
+        }
+
+        return { competitors: details, message: `${details.length} concorrentes encontrados.` };
+      }),
+
+    analyze: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        const competitors = await db.getCompetitorsByProfileId(input.profileId);
+        if (competitors.length === 0) throw new Error("Busque os concorrentes primeiro.");
+
+        const myReviews = await db.getReviewsByProfileId(input.profileId);
+        const myKeywords = extractKeywords(myReviews.map(r => r.comment || "").join(" "));
+
+        const prompt = `Analise estes dados de competitividade para "${profile.name}" e gere uma análise estratégica completa em português.
+
+MEU PERFIL:
+- Nota: ${profile.avgRating || "N/A"} (${profile.totalReviews || 0} avaliações)
+- Categoria: ${profile.category}
+- Endereço: ${profile.address}
+- Palavras-chave nas avaliações: ${myKeywords.slice(0,10).join(", ")}
+
+CONCORRENTES:
+${competitors.slice(0,5).map((c, i) => `${i+1}. ${c.name}: ${c.avgRating || "N/A"}⭐ (${c.totalReviews || 0} avaliações)`).join("\n")}
+
+Responda com JSON:
+{
+  "position": "sua posição no ranking (1-${competitors.length + 1})",
+  "strengths": ["ponto forte 1", "ponto forte 2", "ponto forte 3"],
+  "weaknesses": ["ponto fraco 1", "ponto fraco 2"],
+  "opportunities": ["oportunidade 1", "oportunidade 2", "oportunidade 3"],
+  "actions": ["ação prioritária 1", "ação prioritária 2", "ação prioritária 3", "ação prioritária 4"],
+  "reviewGap": ${(competitors[0]?.totalReviews || 0) - (profile.totalReviews || 0)},
+  "ratingGap": ${((competitors[0]?.avgRating || 0) - (profile.avgRating || 0)).toFixed(1)},
+  "summary": "resumo executivo em 2-3 frases"
+}`;
+
+        const raw = await callGroqAPI([
+          { role: "system", content: "Você é especialista em SEO local e Google Business Profile. Responda APENAS com JSON válido." },
+          { role: "user", content: prompt },
+        ]);
+
+        const clean = raw.replace(/```json\n?|```/g, "").trim();
+        return JSON.parse(clean);
+      }),
   }),
 
   metrics: router({
@@ -234,6 +360,59 @@ Perfil analisado:
   }),
 
   sync: router({
+    // Sincronização via Google Places API (dados reais sem necessidade de GBP API)
+    syncFromPlaces: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        if (!profile.googleLocationId || profile.googleLocationId.startsWith("manual_")) {
+          throw new Error("Este perfil foi adicionado manualmente. Reimporte pelo link do Google Maps para sincronizar.");
+        }
+
+        // Se temos o placeId, busca dados atualizados
+        const placeId = profile.googleLocationId;
+        const details = await getPlaceDetails(placeId);
+        if (!details) throw new Error("Não foi possível buscar dados atualizados do Google.");
+
+        // Atualiza perfil com dados reais
+        await db.updateProfile(input.profileId, {
+          totalReviews: details.totalReviews,
+          avgRating: details.rating,
+          phone: details.phone || profile.phone,
+          website: details.website || profile.website,
+        });
+
+        // Salva avaliações reais
+        let reviewCount = 0;
+        if (details.reviews) {
+          for (const rv of details.reviews) {
+            try {
+              await db.createReview({
+                profileId: input.profileId,
+                googleReviewId: `places_${rv.time}_${rv.author.replace(/\s/g, "")}`,
+                authorName: rv.author,
+                authorPhoto: rv.photoUrl,
+                rating: rv.rating,
+                comment: rv.text || null,
+                reply: null,
+                sentiment: rv.rating >= 4 ? "positive" : rv.rating <= 2 ? "negative" : "neutral",
+                publishedAt: new Date(rv.time),
+              });
+              reviewCount++;
+            } catch (e: any) {
+              if (!e?.message?.includes("Duplicate")) console.warn("[Sync] review skip:", e?.message);
+            }
+          }
+        }
+
+        // Atualiza score
+        const s = calcScore({ totalReviews: details.totalReviews, avgRating: details.rating, website: details.website, phone: details.phone });
+        await db.createScore({ profileId: input.profileId, ...s });
+
+        return { success: true, reviewCount, rating: details.rating, totalReviews: details.totalReviews };
+      }),
+
     // Sincronização completa: reviews + métricas + score
     syncProfile: protectedProcedure
       .input(z.object({ profileId: z.number() }))
