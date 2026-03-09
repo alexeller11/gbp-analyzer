@@ -110,13 +110,27 @@ export const appRouter = router({
         if (!process.env.GOOGLE_PLACES_API_KEY) {
           throw new Error("GOOGLE_PLACES_API_KEY não configurada no servidor");
         }
-        const placeId = await findPlaceFromUrl(input.url);
-        if (!placeId) throw new Error("Não foi possível encontrar este negócio no Google. Verifique o link ou tente pelo nome.");
+
+        let placeId: string | null = null;
+
+        // Se parece uma URL, tenta extrair place_id
+        if (input.url.startsWith("http")) {
+          placeId = await findPlaceFromUrl(input.url);
+        } else {
+          // Busca por texto/nome diretamente
+          const key = process.env.GOOGLE_PLACES_API_KEY;
+          const params = new URLSearchParams({ query: input.url, key, language: "pt-BR" });
+          const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`);
+          const data = await res.json();
+          console.log("[Places] textsearch por nome:", data.status, data.results?.length, "results");
+          placeId = data.results?.[0]?.place_id || null;
+        }
+
+        if (!placeId) throw new Error("Negócio não encontrado. Tente ser mais específico (ex: 'Pizzaria Dom João São Paulo').");
 
         const details = await getPlaceDetails(placeId);
         if (!details) throw new Error("Negócio encontrado mas não foi possível buscar os detalhes.");
 
-        // Mapeia tipos do Google para categoria legível
         const categoryMap: Record<string, string> = {
           restaurant: "Restaurante", gym: "Academia", hospital: "Hospital",
           dentist: "Clínica Odontológica", pharmacy: "Farmácia", lodging: "Hotel/Pousada",
@@ -126,14 +140,11 @@ export const appRouter = router({
           clothing_store: "Loja de Roupas", electronics_store: "Loja de Eletrônicos",
           hair_care: "Cabeleireiro", real_estate_agency: "Imobiliária",
           travel_agency: "Agência de Viagens", veterinary_care: "Clínica Veterinária",
+          establishment: "Estabelecimento", point_of_interest: "Ponto de Interesse",
         };
 
         const category = categoryMap[details.category] || details.category?.replace(/_/g, " ") || "Negócio";
-
-        return {
-          ...details,
-          category,
-        };
+        return { ...details, category };
       }),
 
     create: protectedProcedure
