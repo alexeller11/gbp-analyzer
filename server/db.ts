@@ -162,10 +162,18 @@ export async function getReviewsByProfileId(profileId: number): Promise<Review[]
 export async function createReview(review: typeof reviews.$inferInsert): Promise<Review> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  
+
+  // Verifica se já existe pelo googleReviewId para evitar duplicata
+  if (review.googleReviewId) {
+    const existing = await db.select().from(reviews)
+      .where(eq(reviews.googleReviewId, review.googleReviewId)).limit(1);
+    if (existing.length) return existing[0];
+  }
+
   const result = await db.insert(reviews).values(review);
   const id = (result as any).insertId;
-  
+  if (!id) throw new Error("Failed to create review");
+
   const created = await db.select().from(reviews).where(eq(reviews.id, id)).limit(1);
   if (!created.length) throw new Error("Failed to create review");
   return created[0];
