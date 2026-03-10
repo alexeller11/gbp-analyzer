@@ -12,6 +12,8 @@ import ReviewResponder from "@/pages/ReviewResponder";
 import PostGenerator from "@/pages/PostGenerator";
 import KeywordAnalyzer from "@/pages/KeywordAnalyzer";
 import ActivityMonitor from "@/pages/ActivityMonitor";
+import AISearchOptimizer from "@/pages/AISearchOptimizer";
+import ReportGenerator from "@/pages/ReportGenerator";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -32,6 +34,8 @@ function Router() {
       <Route path="/profile/:profileId/posts" component={PostGenerator} />
       <Route path="/profile/:profileId/keywords" component={KeywordAnalyzer} />
       <Route path="/profile/:profileId/activity" component={ActivityMonitor} />
+      <Route path="/profile/:profileId/ai-search" component={AISearchOptimizer} />
+      <Route path="/profile/:profileId/report" component={ReportGenerator} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

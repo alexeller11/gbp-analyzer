@@ -665,6 +665,122 @@ Responda com JSON exato:
         return { results };
       }),
   }),
+
+  aiSearch: router({
+    analyze: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        const reviews = await db.getReviewsByProfileId(input.profileId);
+        const avgRating = profile.avgRating || 0;
+        const totalReviews = profile.totalReviews || 0;
+        const hasDescription = !!profile.description;
+        const hasWebsite = !!profile.website;
+        const hasPhone = !!profile.phone;
+        const respondedReviews = reviews.filter(r => r.reply).length;
+        const responseRate = reviews.length > 0 ? Math.round((respondedReviews / reviews.length) * 100) : 0;
+
+        const prompt = `Analise este perfil Google Business para visibilidade em IAs (ChatGPT, Gemini, Perplexity, Google AI Overview).
+
+DADOS DO PERFIL:
+- Nome: ${profile.name}
+- Categoria: ${profile.category}
+- Endereço: ${profile.address}
+- Nota: ${avgRating} (${totalReviews} avaliações)
+- Tem descrição: ${hasDescription}
+- Tem site: ${hasWebsite}
+- Tem telefone: ${hasPhone}
+- Taxa de resposta a avaliações: ${responseRate}%
+
+Responda APENAS com JSON válido:
+{
+  "score": número de 0-100,
+  "googleAI": número de 0-100,
+  "chatGPT": número de 0-100,
+  "perplexity": número de 0-100,
+  "factors": [
+    {"factor": "nome do fator", "status": "ok|warn|fail", "description": "explicação curta"},
+    ...mínimo 8 fatores
+  ],
+  "actions": [
+    {"action": "ação concreta", "impact": "impacto esperado"},
+    ...mínimo 5 ações
+  ]
+}`;
+
+        const raw = await callGroqAPI([
+          { role: "system", content: "Você é especialista em SEO para AI Search (LLMs). Responda APENAS com JSON válido." },
+          { role: "user", content: prompt },
+        ]);
+
+        const clean = raw.replace(/```json\n?|```/g, "").trim();
+        return JSON.parse(clean);
+      }),
+  }),
+
+  report: router({
+    generate: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        const score = await db.getScoreByProfileId(input.profileId);
+        const reviews = await db.getReviewsByProfileId(input.profileId);
+        const competitors = await db.getCompetitorsByProfileId(input.profileId);
+
+        const positiveReviews = reviews.filter(r => r.sentiment === "positive").length;
+        const negativeReviews = reviews.filter(r => r.sentiment === "negative").length;
+        const neutralReviews = reviews.filter(r => r.sentiment === "neutral").length;
+        const total = reviews.length || 1;
+
+        // Calcula posição local baseada nos concorrentes
+        const allRatings = [profile.avgRating || 0, ...competitors.map((c: any) => c.rating || 0)].sort((a, b) => b - a);
+        const localRank = allRatings.indexOf(profile.avgRating || 0) + 1;
+
+        // Extrai temas das reviews
+        const allText = reviews.map(r => r.comment || "").join(" ");
+        const themes = extractKeywords(allText).slice(0, 8);
+
+        const prompt = `Gere um relatório estratégico completo para "${profile.name}" (${profile.category}).
+
+DADOS:
+- Score GBP: ${score?.totalScore || 0}/100
+- Nota: ${profile.avgRating || 0} (${profile.totalReviews || 0} avaliações)
+- Reviews positivas: ${positiveReviews}, neutras: ${neutralReviews}, negativas: ${negativeReviews}
+- Concorrentes: ${competitors.length}
+- Posição local estimada: #${localRank}
+- Tem site: ${!!profile.website}, tem descrição: ${!!profile.description}
+
+Responda APENAS com JSON válido:
+{
+  "overallScore": ${score?.totalScore || 0},
+  "localRank": ${localRank},
+  "diagnosis": [
+    {"item": "nome do item", "status": "ok|warn|fail", "detail": "detalhe"},
+    ...mínimo 6 itens
+  ],
+  "sentiment": {
+    "positive": ${Math.round((positiveReviews/total)*100)},
+    "neutral": ${Math.round((neutralReviews/total)*100)},
+    "negative": ${Math.round((negativeReviews/total)*100)},
+    "themes": ${JSON.stringify(themes)}
+  },
+  "actionPlan": [
+    {"action": "ação concreta", "why": "por que é importante", "priority": "alta|media|baixa"},
+    ...mínimo 6 ações ordenadas por prioridade
+  ]
+}`;
+
+        const raw = await callGroqAPI([
+          { role: "system", content: "Você é consultor especialista em Google Business Profile. Responda APENAS com JSON válido." },
+          { role: "user", content: prompt },
+        ]);
+
+        const clean = raw.replace(/```json\n?|```/g, "").trim();
+        return JSON.parse(clean);
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

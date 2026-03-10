@@ -46,6 +46,7 @@ export default function ProfileAnalysis({ params }: Props) {
   const { data: suggestions, refetch: refetchSugs } = trpc.suggestions.listByProfile.useQuery({ profileId });
 
   const syncMutation = trpc.sync.syncProfile.useMutation();
+  const syncPlacesMutation = trpc.sync.syncFromPlaces.useMutation();
   const genSugsMutation = trpc.suggestions.generate.useMutation();
   const toggleMutation = trpc.suggestions.toggleDone.useMutation();
   const deleteMutation = trpc.profiles.delete.useMutation();
@@ -135,12 +136,26 @@ export default function ProfileAnalysis({ params }: Props) {
               {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               Sincronizar
             </Button>
+            <Button variant="outline" className="gap-2" onClick={async () => {
+              setSyncing(true);
+              try {
+                const res = await syncPlacesMutation.mutateAsync({ profileId });
+                toast.success(`✅ ${res.reviewCount} avaliações atualizadas via Google Maps!`);
+                utils.profiles.getById.invalidate({ id: profileId });
+                utils.reviews.getRecent.invalidate({ profileId });
+              } catch (e: any) { toast.error(e.message); }
+              setSyncing(false);
+            }} disabled={syncing}>
+              🗺️ Sync Places
+            </Button>
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/reviews`)}>💬 Respostas IA</Button>
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/posts`)}>✍️ Posts SEO</Button>
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/keywords`)}>🔑 Keywords</Button>
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/activity`)}>📡 Monitor</Button>
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/chat`)}>🤖 Chat IA</Button>
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/charts`)}>📊 Gráficos</Button>
+            <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/ai-search`)}>🧠 AI Search</Button>
+            <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/report`)}>📄 Relatório</Button>
             <Button variant="destructive" size="sm" onClick={handleDelete}>🗑</Button>
           </div>
         </div>
