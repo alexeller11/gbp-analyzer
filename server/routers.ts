@@ -664,6 +664,38 @@ Responda com JSON exato:
 
         return { results };
       }),
+
+    suggest: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        const reviews = await db.getReviewsByProfileId(input.profileId);
+        const reviewSnippets = reviews.slice(0, 10).map(r => r.comment || "").join(". ");
+
+        const prompt = `Você é especialista em SEO local para Google Business Profile.
+
+Negócio: "${profile.name}"
+Categoria: ${profile.category}
+Endereço: ${profile.address}
+Avaliações recentes: ${reviewSnippets || "(sem avaliações ainda)"}
+
+Sugira 10 palavras-chave de alta intenção local que este negócio deveria ranquear no Google Maps.
+Inclua variações com cidade/bairro, serviços específicos e termos que clientes realmente buscam.
+
+Responda APENAS com JSON:
+{
+  "keywords": ["palavra 1", "palavra 2", ..., "palavra 10"],
+  "reasoning": "breve explicação de 1-2 linhas"
+}`;
+
+        const raw = await callGroqAPI([
+          { role: "system", content: "Você é especialista em SEO local. Responda APENAS com JSON válido." },
+          { role: "user", content: prompt },
+        ]);
+        const clean = raw.replace(/```json\n?|```/g, "").trim();
+        return JSON.parse(clean);
+      }),
   }),
 
   aiSearch: router({

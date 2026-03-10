@@ -34,18 +34,27 @@ export async function findPlaceFromUrl(input: string): Promise<string | null> {
   let fullUrl = input;
 
   // Expande URL encurtada (maps.app.goo.gl ou goo.gl)
-  if (input.includes("goo.gl") || input.includes("maps.app.goo.gl")) {
+  if (input.includes("goo.gl")) {
     try {
-      const res = await fetch(input, { method: "GET", redirect: "follow" });
+      const res = await fetch(input, { method: "HEAD", redirect: "follow" });
       fullUrl = res.url;
-    } catch {
+      console.log("[Places] URL expandida:", fullUrl.substring(0, 100));
+    } catch (e) {
+      console.warn("[Places] Não foi possível expandir URL:", e);
       fullUrl = input;
     }
   }
 
-  // Extrai place_id direto da URL se disponível
-  const placeIdMatch = fullUrl.match(/place_id[=!:]([A-Za-z0-9_-]+)/);
-  if (placeIdMatch) return placeIdMatch[1];
+  // Tenta extrair place_id no formato !1s<placeId>
+  const placesIdMatch = fullUrl.match(/!1s(ChIJ[A-Za-z0-9_-]+)/);
+  if (placesIdMatch) {
+    console.log("[Places] place_id extraído direto:", placesIdMatch[1]);
+    return placesIdMatch[1];
+  }
+
+  // Tenta place_id na query string
+  const placeIdQS = fullUrl.match(/place_id[=!:]([A-Za-z0-9_-]+)/);
+  if (placeIdQS) return placeIdQS[1];
 
   // Extrai nome do negócio da URL expandida
   let searchQuery = "";
@@ -64,23 +73,38 @@ export async function findPlaceFromUrl(input: string): Promise<string | null> {
     searchQuery = input;
   }
 
+  console.log("[Places] Buscando por texto:", searchQuery, "coords:", lat, lng);
   if (!searchQuery) return null;
   return await findPlaceByText(searchQuery, lat, lng);
 }
 
 async function findPlaceByText(query: string, lat?: number, lng?: number): Promise<string | null> {
-  const params: any = {
+  const key = PLACES_API_KEY;
+  if (!key) throw new Error("GOOGLE_PLACES_API_KEY não configurada");
+
+  // Tenta findplacefromtext primeiro
+  const params: Record<string, string> = {
     input: query,
     inputtype: "textquery",
     fields: "place_id",
-    key: PLACES_API_KEY,
+    key,
   };
   if (lat && lng) params.locationbias = `point:${lat},${lng}`;
 
-  const url = `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?${new URLSearchParams(params)}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return data.candidates?.[0]?.place_id || null;
+  const url1 = `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?${new URLSearchParams(params)}`;
+  const res1 = await fetch(url1);
+  const data1 = await res1.json();
+  console.log("[Places] findplacefromtext status:", data1.status, "candidates:", data1.candidates?.length);
+  if (data1.candidates?.[0]?.place_id) return data1.candidates[0].place_id;
+
+  // Fallback: textsearch
+  const params2: Record<string, string> = { query, key };
+  if (lat && lng) params2.location = `${lat},${lng}`;
+  const url2 = `https://maps.googleapis.com/maps/api/place/textsearch/json?${new URLSearchParams(params2)}`;
+  const res2 = await fetch(url2);
+  const data2 = await res2.json();
+  console.log("[Places] textsearch status:", data2.status, "results:", data2.results?.length);
+  return data2.results?.[0]?.place_id || null;
 }
 
 /** Busca detalhes completos de um lugar */
@@ -121,32 +145,31 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceResult | nu
 
 /** Busca concorrentes próximos */
 export async function getNearbyCompetitors(lat: number, lng: number, category: string, excludePlaceId?: string): Promise<PlaceResult[]> {
-  // Mapeia categoria para tipo Places API
-  const typeMap: Record<string, string> = {
-    restaurante: "restaurant", academia: "gym", clinica: "hospital",
-    dentista: "dentist", farmacia: "pharmacy", hotel: "lodging",
-    supermercado: "supermarket", loja: "store", salao: "beauty_salon",
-    advogado: "lawyer", contabilidade: "accounting", escola: "school",
-  };
-  const catLower = category.toLowerCase();
-  let type = "establishment";
-  for (const [k, v] of Object.entries(typeMap)) {
-    if (catLower.includes(k)) { type = v; break; }
-  }
+  const key = PLACES_API_KEY;
+  if (!key) throw new Error("GOOGLE_PLACES_API_KEY não configurada");
 
-  const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=2000&type=${type}&key=${PLACES_API_KEY}&language=pt-BR`;
+  // Usa textsearch com a categoria e localização — mais confiável que nearbysearch com type
+  const query = encodeURIComponent(category);
+  const location = `${lat},${lng}`;
+  const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&location=${location}&radius=3000&key=${key}&language=pt-BR`;
+
   const res = await fetch(url);
   const data = await res.json();
-  if (data.status !== "OK") return [];
+  console.log("[Competitors] textsearch status:", data.status, "results:", data.results?.length);
 
-  const competitors = data.results
+  if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
+    console.error("[Competitors] API error:", data.error_message);
+    return [];
+  }
+
+  const competitors = (data.results || [])
     .filter((p: any) => p.place_id !== excludePlaceId)
-    .slice(0, 5)
+    .slice(0, 6)
     .map((p: any) => ({
       placeId: p.place_id,
       name: p.name,
       category,
-      address: p.vicinity,
+      address: p.formatted_address || p.vicinity,
       rating: p.rating,
       totalReviews: p.user_ratings_total,
       lat: p.geometry?.location?.lat,

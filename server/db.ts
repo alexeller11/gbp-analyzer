@@ -195,10 +195,14 @@ export async function getLatestScore(profileId: number): Promise<Score | undefin
 export async function createScore(score: typeof scores.$inferInsert): Promise<Score> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  
+
+  // Se já existe score para este perfil, deleta e recria
+  await db.delete(scores).where(eq(scores.profileId, score.profileId));
+
   const result = await db.insert(scores).values(score);
   const id = (result as any).insertId;
-  
+  if (!id) throw new Error("Failed to create score");
+
   const created = await db.select().from(scores).where(eq(scores.id, id)).limit(1);
   if (!created.length) throw new Error("Failed to create score");
   return created[0];
