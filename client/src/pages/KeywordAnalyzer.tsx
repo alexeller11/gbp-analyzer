@@ -3,13 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, Loader2, Sparkles, TrendingUp, Wand2 } from "lucide-react";
+import { ArrowLeft, Loader2, TrendingUp, Wand2, RefreshCw } from "lucide-react";
 import { useLocation } from "wouter";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 interface Props { params: { profileId: string } }
-
 interface KeywordResult {
   keyword: string; score: number;
   inDescription: boolean; inServices: boolean;
@@ -24,10 +23,33 @@ export default function KeywordAnalyzer({ params }: Props) {
   const [analyzing, setAnalyzing] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [results, setResults] = useState<KeywordResult[]>([]);
+  const [aiReasoning, setAiReasoning] = useState("");
+  const [autoSuggested, setAutoSuggested] = useState(false);
 
   const { data: profile } = trpc.profiles.getById.useQuery({ id: profileId });
   const analyzeMutation = trpc.keywords.analyze.useMutation();
   const suggestMutation = trpc.keywords.suggest.useMutation();
+
+  // Auto-suggest ao carregar (uma vez)
+  useEffect(() => {
+    if (profile && !autoSuggested && !keywords) {
+      setAutoSuggested(true);
+      handleSuggest(true);
+    }
+  }, [profile]);
+
+  const handleSuggest = async (silent = false) => {
+    if (!silent) setSuggesting(true); else setSuggesting(true);
+    try {
+      const res = await suggestMutation.mutateAsync({ profileId });
+      setKeywords(res.keywords.join("\n"));
+      setAiReasoning(res.reasoning || "");
+      if (!silent) toast.success(`✨ ${res.keywords.length} keywords sugeridas!`);
+    } catch (e: any) {
+      if (!silent) toast.error(e.message || "Erro ao sugerir keywords");
+    }
+    setSuggesting(false);
+  };
 
   const handleAnalyze = async () => {
     const kws = keywords.split(/[\n,]/).map(k => k.trim()).filter(Boolean);
@@ -41,23 +63,13 @@ export default function KeywordAnalyzer({ params }: Props) {
     setAnalyzing(false);
   };
 
-  const handleSuggest = async () => {
-    setSuggesting(true);
-    try {
-      const res = await suggestMutation.mutateAsync({ profileId });
-      setKeywords(res.keywords.join("\n"));
-      toast.success(`✨ ${res.keywords.length} keywords sugeridas pela IA!`);
-    } catch (e: any) { toast.error(e.message || "Erro ao sugerir keywords"); }
-    setSuggesting(false);
-  };
-
   function scoreHex(v: number) { return v >= 75 ? "#16a34a" : v >= 50 ? "#d97706" : "#ef4444"; }
   function scoreLabel(v: number) { return v >= 75 ? "Ótimo" : v >= 50 ? "Regular" : "Fraco"; }
   const avgScore = results.length ? Math.round(results.reduce((a, r) => a + r.score, 0) / results.length) : 0;
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 max-w-3xl mx-auto">
+      <div className="space-y-5 max-w-3xl mx-auto">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => setLocation(`/profile/${profileId}`)}>
             <ArrowLeft className="w-4 h-4" />
@@ -76,15 +88,30 @@ export default function KeywordAnalyzer({ params }: Props) {
         <Card>
           <CardContent className="pt-4 space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold">Palavras-chave que você quer ranquear</label>
-              <Button variant="outline" size="sm" onClick={handleSuggest} disabled={suggesting} className="gap-1.5 text-purple-700 border-purple-300 hover:bg-purple-50">
-                {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-                {suggesting ? "Gerando..." : "Sugerir com IA"}
+              <label className="text-sm font-semibold">Palavras-chave para analisar</label>
+              <Button variant="outline" size="sm" onClick={() => handleSuggest(false)} disabled={suggesting}
+                className="gap-1.5 text-purple-700 border-purple-300 hover:bg-purple-50">
+                {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                {suggesting ? "Gerando..." : "Novas sugestões IA"}
               </Button>
             </div>
+
+            {suggesting && !keywords && (
+              <div className="flex items-center gap-2 text-sm text-purple-600 py-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                IA está gerando as melhores keywords para {profile?.name}...
+              </div>
+            )}
+
+            {aiReasoning && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-2.5 text-xs text-purple-700">
+                🧠 {aiReasoning}
+              </div>
+            )}
+
             <textarea
-              className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 min-h-[120px] resize-none"
-              placeholder={"materiais de construção Linhares\nloja de acabamento ES\npiso cerâmico Linhares\n(uma por linha ou separadas por vírgula)"}
+              className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 min-h-[130px] resize-none"
+              placeholder={suggesting ? "Aguarde, IA gerando sugestões..." : "Uma keyword por linha ou separadas por vírgula"}
               value={keywords}
               onChange={e => setKeywords(e.target.value)}
             />

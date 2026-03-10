@@ -285,22 +285,41 @@ Perfil analisado:
       .mutation(async ({ input }) => {
         const profile = await db.getProfileById(input.profileId);
         if (!profile) throw new Error("Perfil não encontrado");
-        if (!profile.latitude || !profile.longitude) {
-          throw new Error("Perfil sem coordenadas. Reimporte o perfil pelo link do Google Maps.");
+
+        let lat = profile.latitude;
+        let lng = profile.longitude;
+
+        // Se não tem coordenadas, geocodifica pelo endereço
+        if (!lat || !lng || lat === 0 || lng === 0) {
+          if (profile.googleLocationId && !profile.googleLocationId.startsWith("manual_") && !profile.googleLocationId.startsWith("places_")) {
+            // Busca coordenadas via place details
+            const details = await getPlaceDetails(profile.googleLocationId);
+            if (details?.lat && details?.lng) {
+              lat = details.lat;
+              lng = details.lng;
+              await db.updateProfile(input.profileId, { latitude: lat, longitude: lng });
+            }
+          }
+          if (!lat || !lng) {
+            // Geocodifica pelo endereço
+            const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(profile.address || profile.name)}&key=${process.env.GOOGLE_PLACES_API_KEY}`;
+            const geoRes = await fetch(geoUrl);
+            const geoData = await geoRes.json();
+            const loc = geoData.results?.[0]?.geometry?.location;
+            if (loc) { lat = loc.lat; lng = loc.lng; await db.updateProfile(input.profileId, { latitude: lat, longitude: lng }); }
+          }
+          if (!lat || !lng) throw new Error("Não foi possível determinar a localização do perfil. Verifique o endereço.");
         }
 
         // Busca concorrentes reais via Places API
-        const nearby = await getNearbyCompetitors(
-          profile.latitude, profile.longitude,
-          profile.category, profile.googleLocationId
-        );
+        const nearby = await getNearbyCompetitors(lat, lng, profile.category, profile.googleLocationId);
 
         if (nearby.length === 0) return { competitors: [], message: "Nenhum concorrente encontrado próximo." };
 
         // Busca detalhes com avaliações
         const details = await getCompetitorDetails(nearby.map(c => c.placeId));
 
-        // Salva no banco
+        // Salva no banco (createCompetitor já faz upsert)
         for (const comp of details) {
           try {
             await db.createCompetitor({
@@ -313,11 +332,11 @@ Perfil analisado:
               category: comp.category,
             });
           } catch (e: any) {
-            if (!e?.message?.includes("Duplicate")) console.warn("[Competitors] insert error:", e);
+            console.warn("[Competitors] insert error:", e?.message);
           }
         }
 
-        return { competitors: details, message: `${details.length} concorrentes encontrados.` };
+        return { competitors: details, message: `${details.length} concorrentes encontrados!` };
       }),
 
     analyze: protectedProcedure
