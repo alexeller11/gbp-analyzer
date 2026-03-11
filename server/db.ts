@@ -278,14 +278,13 @@ export async function storeGoogleToken(
   if (!db) return;
   try {
     const { googleTokens } = await import("../drizzle/schema");
+    // Sem depender de constraint: deleta o existente e insere novo
+    await db.delete(googleTokens).where(eq(googleTokens.userId, userId));
     await db.insert(googleTokens).values({
       userId, googleAccountId, accessToken,
       refreshToken: refreshToken || null,
       expiresAt: expiresAt || null,
       scope: "https://www.googleapis.com/auth/business.manage",
-    }).onConflictDoUpdate({
-      target: [googleTokens.userId, googleTokens.googleAccountId],
-      set: { accessToken, refreshToken: refreshToken || null, expiresAt: expiresAt || null },
     });
   } catch (error) {
     console.error("[DB] storeGoogleToken error:", error);
@@ -318,3 +317,5 @@ export async function deleteSuggestionsByProfileId(profileId: number): Promise<v
   if (!db) return;
   await db.delete(suggestions).where(eq(suggestions.profileId, profileId));
 }
+
+// rebuild Wed Mar 11 13:25:27 UTC 2026
