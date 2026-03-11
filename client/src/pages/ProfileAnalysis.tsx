@@ -2,16 +2,17 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, Loader2, RefreshCw, Star, MessageSquare, BarChart2, Users, Lightbulb } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw, Star, MessageSquare, BarChart2, Users, Lightbulb, Search, Plus, Trash2, Zap, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { useLocation } from "wouter";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  RadarChart, PolarGrid, PolarAngleAxis, Radar,
+  RadarChart, PolarGrid, PolarAngleAxis, Radar, Cell,
 } from "recharts";
 
 interface Props { params: { id: string } }
@@ -38,11 +39,19 @@ export default function ProfileAnalysis({ params }: Props) {
   const profileId = parseInt(params.id);
   const [syncing, setSyncing] = useState(false);
   const [genSuggestions, setGenSuggestions] = useState(false);
+  const [compQuery, setCompQuery] = useState("");
+  const [compSearching, setCompSearching] = useState(false);
+  const [compResults, setCompResults] = useState<any[]>([]);
+  const [compAdding, setCompAdding] = useState<string | null>(null);
+  const [compFetching, setCompFetching] = useState(false);
+  const [compAnalysis, setCompAnalysis] = useState<any>(null);
+  const [compAnalyzing, setCompAnalyzing] = useState(false);
+  const [compAnalysisFor, setCompAnalysisFor] = useState<number | null>(null);
 
   const { data: profile, isLoading: profileLoading } = trpc.profiles.getById.useQuery({ id: profileId });
   const { data: score, refetch: refetchScore } = trpc.scores.getByProfile.useQuery({ profileId });
   const { data: reviews } = trpc.reviews.getRecent.useQuery({ profileId });
-  const { data: competitors } = trpc.competitors.getByProfile.useQuery({ profileId });
+  const { data: competitors, refetch: refetchComp } = trpc.competitors.getByProfile.useQuery({ profileId });
   const { data: suggestions, refetch: refetchSugs } = trpc.suggestions.listByProfile.useQuery({ profileId });
 
   const syncMutation = trpc.sync.syncProfile.useMutation();
@@ -50,7 +59,66 @@ export default function ProfileAnalysis({ params }: Props) {
   const genSugsMutation = trpc.suggestions.generate.useMutation();
   const toggleMutation = trpc.suggestions.toggleDone.useMutation();
   const deleteMutation = trpc.profiles.delete.useMutation();
+  const compSearchMutation = trpc.competitors.searchByName.useMutation();
+  const compAddMutation = trpc.competitors.addByPlaceId.useMutation();
+  const compRemoveMutation = trpc.competitors.remove.useMutation();
+  const compFetchMutation = trpc.competitors.fetchReal.useMutation();
+  const compAnalyzeMutation = trpc.competitors.analyze.useMutation();
   const utils = trpc.useUtils();
+
+  const handleCompSearch = async () => {
+    if (!compQuery.trim()) return;
+    setCompSearching(true); setCompResults([]);
+    try {
+      const res = await compSearchMutation.mutateAsync({ query: compQuery.trim(), profileId });
+      setCompResults(res);
+      if (!res.length) toast.info("Nenhum resultado encontrado");
+    } catch (e: any) { toast.error(e.message); }
+    setCompSearching(false);
+  };
+
+  const handleCompAdd = async (placeId: string, name: string) => {
+    setCompAdding(placeId);
+    try {
+      await compAddMutation.mutateAsync({ profileId, placeId });
+      toast.success(`✅ ${name} adicionado!`);
+      setCompResults([]); setCompQuery("");
+      utils.competitors.getByProfile.invalidate({ profileId });
+      refetchComp();
+    } catch (e: any) { toast.error(e.message); }
+    setCompAdding(null);
+  };
+
+  const handleCompRemove = async (id: number, name: string) => {
+    try {
+      await compRemoveMutation.mutateAsync({ competitorId: id });
+      toast.success(`Removido: ${name}`);
+      if (compAnalysisFor === id) { setCompAnalysis(null); setCompAnalysisFor(null); }
+      utils.competitors.getByProfile.invalidate({ profileId });
+      refetchComp();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleCompFetchAuto = async () => {
+    setCompFetching(true);
+    try {
+      const res = await compFetchMutation.mutateAsync({ profileId });
+      toast.success(res.message);
+      utils.competitors.getByProfile.invalidate({ profileId });
+      refetchComp();
+    } catch (e: any) { toast.error(e.message); }
+    setCompFetching(false);
+  };
+
+  const handleAnalyzeAll = async () => {
+    if (!competitors?.length) { toast.error("Adicione pelo menos 1 concorrente"); return; }
+    setCompAnalyzing(true); setCompAnalysisFor(null);
+    try {
+      const res = await compAnalyzeMutation.mutateAsync({ profileId });
+      setCompAnalysis(res);
+    } catch (e: any) { toast.error(e.message); }
+    setCompAnalyzing(false);
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -286,33 +354,262 @@ export default function ProfileAnalysis({ params }: Props) {
 
           {/* COMPETITORS */}
           <TabsContent value="competitors" className="space-y-4 mt-4">
-            <div className="grid md:grid-cols-2 gap-4">
-              <Card><CardHeader><CardTitle className="text-base">Concorrentes Próximos</CardTitle></CardHeader>
-                <CardContent>
-                  {!competitors || competitors.length === 0
-                    ? <p className="text-sm text-muted-foreground text-center py-8">Nenhum concorrente encontrado</p>
-                    : (competitors || []).map((c: any) => (
-                        <div key={c.id} className="flex items-center justify-between py-2.5 border-b last:border-0">
-                          <div><p className="font-medium text-sm">{c.name}</p><p className="text-xs text-muted-foreground">{c.address}</p></div>
-                          <div className="text-right"><Stars v={c.rating || 0} /><p className="text-xs text-muted-foreground">{c.reviewCount || 0} avaliações</p></div>
+
+            {/* Busca manual */}
+            <Card>
+              <CardHeader className="pb-2 pt-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <Search className="w-4 h-4" /> Adicionar Concorrente
+                  </CardTitle>
+                  <Button variant="outline" size="sm" onClick={handleCompFetchAuto} disabled={compFetching} className="gap-1.5">
+                    {compFetching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    Busca Automática
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder='Ex: "Salão da Maria, Linhares ES"'
+                    value={compQuery}
+                    onChange={e => setCompQuery(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleCompSearch()}
+                  />
+                  <Button onClick={handleCompSearch} disabled={compSearching || !compQuery.trim()} size="sm" className="px-3">
+                    {compSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  </Button>
+                </div>
+                {compResults.length > 0 && (
+                  <div className="border rounded-xl divide-y overflow-hidden">
+                    {compResults.map((r: any) => (
+                      <div key={r.placeId} className="flex items-center gap-3 p-3 hover:bg-gray-50">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{r.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            ⭐ {r.rating || "—"} · {r.reviewCount || 0} av. · {r.address?.split(",")[0]}
+                          </p>
                         </div>
+                        <Button size="sm" variant="outline" className="flex-shrink-0 gap-1 h-7 text-xs"
+                          disabled={compAdding === r.placeId}
+                          onClick={() => handleCompAdd(r.placeId, r.name)}>
+                          {compAdding === r.placeId ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                          Adicionar
+                        </Button>
+                      </div>
                     ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Lista de concorrentes */}
+            {(competitors?.length || 0) > 0 ? (
+              <Card>
+                <CardHeader className="pb-2 pt-4">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm">{competitors?.length} Concorrentes</CardTitle>
+                    <Button size="sm" onClick={handleAnalyzeAll} disabled={compAnalyzing} className="gap-1.5 h-7 text-xs">
+                      {compAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                      {compAnalyzing ? "Analisando..." : "Análise IA Completa"}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {/* Meu perfil */}
+                  <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border-b">
+                    <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
+                      <Star className="w-3 h-3 text-white fill-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-sm text-blue-700 truncate">{profile?.name} <span className="font-normal opacity-60">(você)</span></p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="font-bold text-sm">⭐ {profile?.avgRating?.toFixed(1)}</p>
+                      <p className="text-xs text-muted-foreground">{profile?.totalReviews} av.</p>
+                    </div>
+                  </div>
+                  {/* Concorrentes */}
+                  {competitors?.map((c: any, i: number) => {
+                    const diff = (c.rating || 0) - (profile?.avgRating || 0);
+                    const threatColor = diff > 0.3 ? "#ef4444" : diff > 0 ? "#f59e0b" : "#22c55e";
+                    return (
+                      <div key={c.id} className="border-b last:border-0">
+                        <div className="flex items-center gap-3 px-4 py-3">
+                          <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">
+                            {i + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{c.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{c.address?.split(",")[0]}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="text-right">
+                              <p className="font-medium text-sm">⭐ {c.rating?.toFixed(1) || "—"}</p>
+                              <p className="text-xs text-muted-foreground">{c.reviewCount || 0} av.</p>
+                            </div>
+                            <span className="text-xs font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${threatColor}18`, color: threatColor }}>
+                              {diff > 0 ? "+" : ""}{diff.toFixed(1)}
+                            </span>
+                            <Button variant="ghost" size="icon" className="w-6 h-6 text-red-400 hover:text-red-600"
+                              onClick={() => handleCompRemove(c.id, c.name)}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </CardContent>
               </Card>
-              <Card><CardHeader><CardTitle className="text-base">Comparação de Nota</CardTitle></CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={compData} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" domain={[0, 5]} tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={90} />
-                      <Tooltip {...ttip} />
-                      <Bar dataKey="rating" fill="#3b82f6" radius={[0,4,4,0]} name="Nota" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </div>
+            ) : (
+              <Card><CardContent className="text-center py-10">
+                <div className="text-4xl mb-2">🏆</div>
+                <p className="font-medium text-sm">Nenhum concorrente ainda</p>
+                <p className="text-xs text-muted-foreground mt-1">Pesquise pelo nome ou use a busca automática</p>
+              </CardContent></Card>
+            )}
+
+            {/* Gráfico comparativo */}
+            {(competitors?.length || 0) > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader className="pb-1 pt-4"><CardTitle className="text-xs text-muted-foreground uppercase tracking-wide">Nota Média</CardTitle></CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={160}>
+                      <BarChart layout="vertical" data={[
+                        { name: profile?.name?.substring(0,14) || "Você", v: profile?.avgRating || 0, you: true },
+                        ...(competitors || []).slice(0,4).map((c: any) => ({ name: c.name?.substring(0,14), v: c.rating || 0, you: false }))
+                      ]} margin={{ left: 0, right: 16 }}>
+                        <XAxis type="number" domain={[0,5]} tick={{ fontSize: 10 }} />
+                        <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 10 }} />
+                        <Tooltip formatter={(v: any) => v.toFixed(1)} />
+                        <Bar dataKey="v" radius={3}>
+                          {[{ you: true }, ...(competitors || []).slice(0,4)].map((d: any, i) => (
+                            <Cell key={i} fill={d.you ? "#2563eb" : "#94a3b8"} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-1 pt-4"><CardTitle className="text-xs text-muted-foreground uppercase tracking-wide">Avaliações</CardTitle></CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={160}>
+                      <BarChart layout="vertical" data={[
+                        { name: profile?.name?.substring(0,14) || "Você", v: profile?.totalReviews || 0, you: true },
+                        ...(competitors || []).slice(0,4).map((c: any) => ({ name: c.name?.substring(0,14), v: c.reviewCount || 0, you: false }))
+                      ]} margin={{ left: 0, right: 16 }}>
+                        <XAxis type="number" tick={{ fontSize: 10 }} />
+                        <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 10 }} />
+                        <Tooltip />
+                        <Bar dataKey="v" radius={3}>
+                          {[{ you: true }, ...(competitors || []).slice(0,4)].map((d: any, i) => (
+                            <Cell key={i} fill={d.you ? "#2563eb" : "#94a3b8"} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Análise IA */}
+            {compAnalysis && (
+              <div className="space-y-3">
+                {/* Resumo */}
+                <Card className="border-blue-200 bg-blue-50/40">
+                  <CardContent className="pt-4">
+                    <div className="flex items-start gap-3">
+                      <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg flex-shrink-0">
+                        #{compAnalysis.position}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-bold text-blue-800 text-sm">Sua posição no ranking</p>
+                        <p className="text-sm text-blue-700 mt-1">{compAnalysis.summary}</p>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {compAnalysis.ratingGap !== undefined && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${Number(compAnalysis.ratingGap) > 0 ? "bg-red-100 text-red-600" : "bg-green-100 text-green-600"}`}>
+                              Nota: {Number(compAnalysis.ratingGap) > 0 ? "+" : ""}{compAnalysis.ratingGap} vs líder
+                            </span>
+                          )}
+                          {compAnalysis.reviewGap !== undefined && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${Number(compAnalysis.reviewGap) > 0 ? "bg-orange-100 text-orange-600" : "bg-green-100 text-green-600"}`}>
+                              {Number(compAnalysis.reviewGap) > 0 ? `${compAnalysis.reviewGap} av. a menos` : "Mais avaliações que o líder"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* SWOT + Ações */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Card className="border-green-200">
+                    <CardHeader className="py-3 px-4"><CardTitle className="text-xs font-bold text-green-700">💪 Pontos Fortes</CardTitle></CardHeader>
+                    <CardContent className="px-4 pb-3 pt-0 space-y-1">
+                      {compAnalysis.strengths?.map((s: string, i: number) => (
+                        <p key={i} className="text-xs flex gap-1.5"><span className="text-green-500">✓</span>{s}</p>
+                      ))}
+                    </CardContent>
+                  </Card>
+                  <Card className="border-red-200">
+                    <CardHeader className="py-3 px-4"><CardTitle className="text-xs font-bold text-red-700">⚠️ Pontos Fracos</CardTitle></CardHeader>
+                    <CardContent className="px-4 pb-3 pt-0 space-y-1">
+                      {compAnalysis.weaknesses?.map((s: string, i: number) => (
+                        <p key={i} className="text-xs flex gap-1.5"><span className="text-red-500">✕</span>{s}</p>
+                      ))}
+                    </CardContent>
+                  </Card>
+                  <Card className="border-purple-200">
+                    <CardHeader className="py-3 px-4"><CardTitle className="text-xs font-bold text-purple-700">🎯 Ações Prioritárias</CardTitle></CardHeader>
+                    <CardContent className="px-4 pb-3 pt-0 space-y-1.5">
+                      {compAnalysis.actions?.map((a: string, i: number) => (
+                        <p key={i} className="text-xs flex gap-1.5">
+                          <span className="bg-purple-100 text-purple-700 rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0 font-bold">{i+1}</span>
+                          {a}
+                        </p>
+                      ))}
+                    </CardContent>
+                  </Card>
+                  <Card className="border-yellow-200">
+                    <CardHeader className="py-3 px-4"><CardTitle className="text-xs font-bold text-yellow-700">✨ Oportunidades</CardTitle></CardHeader>
+                    <CardContent className="px-4 pb-3 pt-0 space-y-1">
+                      {compAnalysis.opportunities?.map((o: string, i: number) => (
+                        <p key={i} className="text-xs flex gap-1.5"><span className="text-yellow-500">→</span>{o}</p>
+                      ))}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Análise individual por concorrente */}
+                {compAnalysis.competitorInsights?.length > 0 && (
+                  <Card>
+                    <CardHeader className="py-3 px-4"><CardTitle className="text-xs font-bold">🔍 Análise Individual</CardTitle></CardHeader>
+                    <CardContent className="px-4 pb-3 pt-0 space-y-2">
+                      {compAnalysis.competitorInsights.map((ci: any, i: number) => {
+                        const tc = ci.threat === "alto" ? "#ef4444" : ci.threat === "médio" ? "#f59e0b" : "#22c55e";
+                        return (
+                          <div key={i} className="flex gap-2 p-2.5 rounded-lg bg-gray-50 items-start">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5"
+                              style={{ background: `${tc}22`, color: tc }}>
+                              {ci.threat}
+                            </span>
+                            <div>
+                              <p className="font-semibold text-xs">{ci.name}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{ci.insight}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
           </TabsContent>
 
           {/* SUGGESTIONS */}
