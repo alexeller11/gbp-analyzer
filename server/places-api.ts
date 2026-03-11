@@ -176,39 +176,53 @@ export async function getNearbyCompetitors(
   const location = `${lat},${lng}`;
   const allResults: any[] = [];
 
-  // Estratégia 1: busca pela categoria do negócio
-  const catQuery = category && category !== "Estabelecimento" && category !== "Negócio"
-    ? category
-    : businessName?.split(" ").slice(-2).join(" ") || "loja";
+  // Estratégia principal: busca exatamente como o Google Maps faz
+  // quando você pesquisa o nome do negócio — retorna os concorrentes do mesmo segmento
+  const queries = [
+    category && category !== "Estabelecimento" && category !== "Negócio" ? category : null,
+    businessName || null,
+  ].filter(Boolean) as string[];
 
-  const url1 = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(catQuery)}&location=${location}&radius=5000&key=${key}&language=pt-BR`;
-  const r1 = await fetch(url1);
-  const d1 = await r1.json();
-  console.log("[Competitors] query1:", catQuery, "status:", d1.status, "results:", d1.results?.length);
-  if (d1.results) allResults.push(...d1.results);
-
-  // Estratégia 2: nearbysearch por tipo se tiver poucos resultados
-  if (allResults.length < 3) {
-    const typeMap: Record<string, string> = {
-      restaurante: "restaurant", academia: "gym", farmácia: "pharmacy",
-      hotel: "lodging", supermercado: "supermarket", dentista: "dentist",
-      materiais: "hardware_store", construção: "hardware_store",
-      padaria: "bakery", bar: "bar", café: "cafe", loja: "store",
-      salão: "beauty_salon", cabelereiro: "hair_care", clínica: "doctor",
-    };
-    const catLower = (category + " " + (businessName || "")).toLowerCase();
-    let type = "store";
-    for (const [k, v] of Object.entries(typeMap)) {
-      if (catLower.includes(k)) { type = v; break; }
+  for (const q of queries) {
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}&location=${location}&radius=5000&key=${key}&language=pt-BR`;
+    const r = await fetch(url);
+    const d = await r.json();
+    console.log("[Competitors] query:", q, "status:", d.status, "results:", d.results?.length);
+    if (d.results?.length) {
+      allResults.push(...d.results);
+      break; // primeira query com resultado já é suficiente
     }
-    const url2 = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location}&radius=5000&type=${type}&key=${key}&language=pt-BR`;
-    const r2 = await fetch(url2);
-    const d2 = await r2.json();
-    console.log("[Competitors] nearbysearch type:", type, "status:", d2.status, "results:", d2.results?.length);
-    if (d2.results) allResults.push(...d2.results);
   }
 
-  // Deduplica e filtra o próprio negócio
+  // Fallback: nearbysearch se textsearch não trouxe nada
+  if (allResults.length < 3) {
+    const typeMap: Record<string, string> = {
+      restaurante: "restaurant", lanchonete: "restaurant", pizza: "restaurant",
+      academia: "gym", farmácia: "pharmacy", hotel: "lodging", pousada: "lodging",
+      supermercado: "supermarket", mercado: "supermarket",
+      dentista: "dentist", odonto: "dentist", clínica: "doctor", médico: "doctor",
+      padaria: "bakery", confeitaria: "bakery", bar: "bar", café: "cafe",
+      salão: "beauty_salon", cabelereiro: "hair_care", barbearia: "hair_care",
+      materiais: "hardware_store", construção: "hardware_store", elétrica: "electrician",
+      contábil: "accounting", advocacia: "lawyer", imobiliária: "real_estate_agency",
+      veterinária: "veterinary_care", pet: "pet_store", escola: "school",
+      oficina: "car_repair", auto: "car_repair",
+    };
+
+    const searchText = `${category} ${businessName || ""}`.toLowerCase();
+    let type = "establishment";
+    for (const [k, v] of Object.entries(typeMap)) {
+      if (searchText.includes(k)) { type = v; break; }
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location}&radius=5000&type=${type}&key=${key}&language=pt-BR`;
+    const r = await fetch(url);
+    const d = await r.json();
+    console.log("[Competitors] nearbysearch type:", type, "status:", d.status, "results:", d.results?.length);
+    if (d.results) allResults.push(...d.results);
+  }
+
+  // Deduplica, remove o próprio negócio, retorna os 6 mais próximos/relevantes
   const seen = new Set<string>();
   return allResults
     .filter((p: any) => {
