@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { Search, Loader2, Camera, FileText, RefreshCw, Zap, CheckCircle2 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
@@ -68,9 +68,12 @@ export default function Dashboard() {
     setSyncStep("");
   };
 
-  // Na primeira carga sem perfis, tenta auto-importar
+  const autoImportFired = useRef(false);
+
+  // Na primeira carga sem perfis, tenta auto-importar — apenas UMA vez
   useEffect(() => {
-    if (!isLoading && profiles && profiles.length === 0 && !syncing) {
+    if (!isLoading && profiles !== undefined && profiles.length === 0 && !autoImportFired.current) {
+      autoImportFired.current = true;
       handleAutoImport(true);
     }
   }, [isLoading, profiles]);

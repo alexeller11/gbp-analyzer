@@ -668,6 +668,9 @@ Responda com JSON:
 
               results.push({ name: profile.name, profileId: profile.id, reviews: locReviewCount });
               console.log(`[AutoImport] ✅ ${profile.name}: ${locReviewCount} reviews`);
+
+              // Pequeno delay entre localizações para evitar rate limit
+              await new Promise(r => setTimeout(r, 300));
             } catch (e) {
               console.error("[AutoImport] Error for location", rawLoc.name, e);
             }

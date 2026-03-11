@@ -33,9 +33,25 @@ export interface GBPLocation {
 
 const PLACES_KEY = process.env.GOOGLE_PLACES_API_KEY;
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
+  for (let i = 0; i < retries; i++) {
+    const res = await fetch(url, options);
+    if (res.status === 429) {
+      const wait = (i + 1) * 2000; // 2s, 4s, 6s
+      console.warn(`[GBP] 429 rate limit, aguardando ${wait}ms (tentativa ${i + 1}/${retries})`);
+      await sleep(wait);
+      continue;
+    }
+    return res;
+  }
+  return fetch(url, options); // última tentativa sem retry
+}
+
 /** Busca todas as contas GBP do usuário */
 export async function getBusinessAccounts(accessToken: string): Promise<any[]> {
-  const response = await fetch(
+  const response = await fetchWithRetry(
     "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
@@ -62,7 +78,7 @@ export async function getBusinessLocations(accessToken: string, accountId: strin
     const params = new URLSearchParams({ readMask, pageSize: "100" });
     if (pageToken) params.set("pageToken", pageToken);
     
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://mybusinessbusinessinformation.googleapis.com/v1/accounts/${accountId}/locations?${params}`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
@@ -70,6 +86,7 @@ export async function getBusinessLocations(accessToken: string, accountId: strin
     const data = await response.json();
     allLocations.push(...(data.locations || []));
     pageToken = data.nextPageToken;
+    if (pageToken) await sleep(500); // evita rate limit entre páginas
   } while (pageToken);
 
   return allLocations;
