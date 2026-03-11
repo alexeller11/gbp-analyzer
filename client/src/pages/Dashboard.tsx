@@ -42,6 +42,7 @@ export default function Dashboard() {
   const [syncing, setSyncing] = useState(false);
   const [syncStep, setSyncStep] = useState("");
   const [syncDone, setSyncDone] = useState<any>(null);
+  const [syncError, setSyncError] = useState("");
 
   const { data: profiles, isLoading, refetch } = trpc.profiles.list.useQuery();
   const autoImportMutation = trpc.googleBusiness.autoImport.useMutation();
@@ -56,13 +57,17 @@ export default function Dashboard() {
       setSyncStep("Sincronizando avaliações...");
       await refetch();
       setSyncDone(result);
-      if (!silent) {
-        toast.success(`✅ ${result.imported} perfis importados · ${result.reviewsSynced} avaliações sincronizadas`);
+      if (!silent || (result as any).fallback) {
+        const msg = (result as any).fallback
+          ? `Sincronizado via Places API · ${result.reviewsSynced} avaliações`
+          : `✅ ${result.imported} perfis importados · ${result.reviewsSynced} avaliações sincronizadas`;
+        toast.success(msg);
       }
     } catch (e: any) {
       const msg = e.message || "Erro na sincronização";
+      setSyncError(msg);
       if (!silent) toast.error(msg);
-      else toast.error(msg);
+      else toast.warning("⚠️ Ative as APIs Google Business em console.cloud.google.com");
     }
     setSyncing(false);
     setSyncStep("");
@@ -108,7 +113,26 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        {/* Banner de sync em progresso */}
+        {/* Banner de erro de API */}
+        {syncError && !syncing && (
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="font-semibold text-orange-800 text-sm">⚠️ APIs Google Business não ativadas</p>
+                <p className="text-orange-600 text-xs mt-1">Para importar perfis automaticamente, ative as APIs no Google Cloud Console:</p>
+                <ol className="text-orange-600 text-xs mt-2 space-y-1 list-decimal list-inside">
+                  <li>Acesse <a href="https://console.cloud.google.com/apis/library" target="_blank" className="underline font-medium">console.cloud.google.com/apis/library</a></li>
+                  <li>Pesquise e ative: <strong>My Business Account Management API</strong></li>
+                  <li>Ative também: <strong>My Business Business Information API</strong></li>
+                  <li>Volte aqui e clique em "Sincronizar Tudo"</li>
+                </ol>
+              </div>
+              <button className="text-orange-400 hover:text-orange-600 ml-3 flex-shrink-0" onClick={() => setSyncError("")}>✕</button>
+            </div>
+          </div>
+        )}
+
+
         {syncing && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3">
             <Loader2 className="w-5 h-5 animate-spin text-blue-600 flex-shrink-0" />

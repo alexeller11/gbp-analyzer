@@ -562,8 +562,80 @@ Responda com JSON:
 
         const { getBusinessAccounts, getBusinessLocations, getLocationReviews, parseLocation, enrichWithPlacesData } = await import("./google-mybusiness-api");
 
-        const accounts = await getBusinessAccounts(accessToken);
-        if (!accounts.length) return { imported: 0, skipped: 0, reviewsSynced: 0, profiles: [] };
+        // Tenta buscar contas via API
+        let accounts: any[] = [];
+        try {
+          accounts = await getBusinessAccounts(accessToken);
+        } catch (e) {
+          console.warn("[AutoImport] Accounts API indisponível, usando fallback Places API");
+        }
+
+        // FALLBACK: se Accounts API falhou ou retornou vazio,
+        // sincroniza os perfis já existentes no banco via Places API
+        if (!accounts.length) {
+          const existingProfiles = await db.getProfilesByUserId(ctx.user.id);
+          if (!existingProfiles.length) {
+            throw new Error(
+              "Não foi possível acessar sua conta Google Business. " +
+              "Verifique se as APIs estão ativas em console.cloud.google.com: " +
+              "'My Business Account Management API' e 'My Business Business Information API'."
+            );
+          }
+
+          // Sincroniza perfis existentes via Places API
+          let reviewsSynced = 0;
+          const results: any[] = [];
+          for (const profile of existingProfiles) {
+            try {
+              const { getPlaceDetails } = await import("./places-api");
+              if (!profile.googleLocationId.startsWith("manual_") && !profile.googleLocationId.startsWith("places_")) {
+                // Tenta sync via GBP API direta (sem precisar da Accounts API)
+                try {
+                  const reviews = await getLocationReviews(accessToken, profile.googleLocationId);
+                  let count = 0;
+                  for (const rv of reviews) {
+                    try {
+                      await db.createReview({
+                        profileId: profile.id,
+                        googleReviewId: rv.name,
+                        authorName: rv.reviewer?.displayName || "Anônimo",
+                        authorPhoto: rv.reviewer?.profilePhotoUrl || null,
+                        rating: rv.starRating || 0,
+                        comment: rv.comment || null,
+                        reply: rv.reviewReply?.comment || null,
+                        sentiment: (rv.starRating || 0) >= 4 ? "positive" : (rv.starRating || 0) <= 2 ? "negative" : "neutral",
+                        publishedAt: new Date(rv.createTime),
+                      });
+                      count++;
+                    } catch {}
+                  }
+                  reviewsSynced += count;
+                  results.push({ name: profile.name, profileId: profile.id, reviews: count });
+                } catch {}
+              } else if (profile.googleLocationId.startsWith("places_") || profile.placeId) {
+                // Fallback Places API
+                const placeId = (profile as any).placeId || profile.googleLocationId.replace("places_", "");
+                const details = await getPlaceDetails(placeId);
+                if (details) {
+                  await db.updateProfile(profile.id, {
+                    totalReviews: details.totalReviews,
+                    avgRating: details.rating,
+                    photoCount: details.photos?.length || profile.photoCount,
+                    description: details.description || profile.description,
+                    latitude: details.lat || profile.latitude,
+                    longitude: details.lng || profile.longitude,
+                    lastSyncAt: new Date(),
+                  });
+                }
+              }
+              const s = calcScore(await db.getProfileById(profile.id) || profile);
+              await db.createScore({ profileId: profile.id, ...s });
+            } catch (e) {
+              console.warn("[AutoImport fallback] error for", profile.name, e);
+            }
+          }
+          return { imported: 0, skipped: existingProfiles.length, reviewsSynced, profiles: results, fallback: true };
+        }
 
         let imported = 0, skipped = 0, reviewsSynced = 0;
         const results: any[] = [];
@@ -575,19 +647,14 @@ Responda com JSON:
 
           for (const rawLoc of rawLocations) {
             try {
-              // Parse dados da GBP API
               let loc = parseLocation(rawLoc, accountId) as any;
-
-              // Enriquecer com Places API (rating, reviews, fotos, coords)
               loc = await enrichWithPlacesData(loc);
 
-              // Verifica se já existe no banco (por googleLocationId)
               const existing = await db.getProfilesByUserId(ctx.user.id)
                 .then(ps => ps.find(p => p.googleLocationId === loc.locationName));
 
               let profile: any;
               if (existing) {
-                // Atualiza dados existentes
                 profile = await db.updateProfile(existing.id, {
                   name: loc.name || existing.name,
                   category: loc.category || existing.category,
@@ -605,7 +672,6 @@ Responda com JSON:
                 });
                 skipped++;
               } else {
-                // Cria novo perfil
                 profile = await db.createProfile({
                   userId: ctx.user.id,
                   googleAccountId: accountId,
@@ -627,11 +693,9 @@ Responda com JSON:
                 imported++;
               }
 
-              // Calcula score
               const s = calcScore(profile);
               await db.createScore({ profileId: profile.id, ...s });
 
-              // Sincroniza reviews via GBP API (sem limite)
               let locReviewCount = 0;
               try {
                 const reviews = await getLocationReviews(accessToken, loc.locationName);
@@ -656,7 +720,6 @@ Responda com JSON:
                 console.warn("[AutoImport] Reviews error for", loc.locationName, e);
               }
 
-              // Atualiza contadores finais com reviews reais do banco
               const allReviews = await db.getReviewsByProfileId(profile.id);
               if (allReviews.length > 0) {
                 const avgRating = allReviews.reduce((s, r) => s + (r.rating || 0), 0) / allReviews.length;
@@ -668,8 +731,6 @@ Responda com JSON:
 
               results.push({ name: profile.name, profileId: profile.id, reviews: locReviewCount });
               console.log(`[AutoImport] ✅ ${profile.name}: ${locReviewCount} reviews`);
-
-              // Pequeno delay entre localizações para evitar rate limit
               await new Promise(r => setTimeout(r, 300));
             } catch (e) {
               console.error("[AutoImport] Error for location", rawLoc.name, e);
