@@ -27,7 +27,7 @@ function Router() {
       <Route path="/api/oauth/google/callback" component={GoogleOAuthCallback} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/checklist" component={Checklist} />
-      <Route path="/profile/:id" component={ProfileAnalysis} />
+      <Route path="/profile/:profileId" component={ProfileAnalysis} />
       <Route path="/profile/:profileId/chat" component={AIChatPage} />
       <Route path="/profile/:profileId/charts" component={PerformanceCharts} />
       <Route path="/profile/:profileId/competitors" component={CompetitorComparison} />
