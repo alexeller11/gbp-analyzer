@@ -1,16 +1,14 @@
-import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ImportProfileDialog } from "@/components/ImportProfileDialog";
 import { trpc } from "@/lib/trpc";
-import { Search, Loader2, Star, MessageSquare, Camera, FileText, RefreshCw } from "lucide-react";
+import { Search, Loader2, Camera, FileText, RefreshCw, Zap, CheckCircle2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
-function scoreColor(v: number) { return v >= 75 ? "#16a34a" : v >= 50 ? "#d97706" : "#ef4444" }
+function scoreColor(v: number) { return v >= 75 ? "#16a34a" : v >= 50 ? "#d97706" : "#ef4444"; }
 
 function ScoreRing({ value, size = 56 }: { value: number; size?: number }) {
   const c = scoreColor(value);
@@ -29,21 +27,53 @@ function ScoreRing({ value, size = 56 }: { value: number; size?: number }) {
   );
 }
 
+function calcScore(p: any) {
+  const completeness = Math.min(100, (p.name?15:0)+(p.address?15:0)+(p.phone?15:0)+(p.website?15:0)+(p.description?20:0)+(p.category?10:0)+(p.isVerified?10:0));
+  const reviewScore = Math.min(100, (Math.min(p.totalReviews||0,200)*0.3)+((p.avgRating||0)*14));
+  const engagement = Math.min(100, ((p.avgRating||0)*14)+(Math.min(p.totalReviews||0,100)*0.3)+(Math.min(p.postCount||0,30)*1.2));
+  const consistency = Math.min(100, ((p.avgRating||0)*12)+(p.isVerified?20:0)+(p.phone?12:0)+(p.website?12:0)+(p.description?8:0));
+  const mediaScore = Math.min(100, (Math.min(p.photoCount||0,60)*1.1)+(Math.min(p.postCount||0,30)*1.5));
+  return Math.round(completeness*0.2+reviewScore*0.25+engagement*0.2+consistency*0.2+mediaScore*0.15);
+}
+
 export default function Dashboard() {
-  const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncStep, setSyncStep] = useState("");
+  const [syncDone, setSyncDone] = useState<any>(null);
 
   const { data: profiles, isLoading, refetch } = trpc.profiles.list.useQuery();
-  const { data: scoresList } = trpc.scores.getByProfile as any;
+  const autoImportMutation = trpc.googleBusiness.autoImport.useMutation();
 
-  // Auto-abrir importação se voltou do OAuth
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("import") === "true") {
-      window.history.replaceState({}, "", "/dashboard");
+  const handleAutoImport = async (silent = false) => {
+    setSyncing(true);
+    setSyncStep("Conectando à sua conta Google Business...");
+    setSyncDone(null);
+    try {
+      setSyncStep("Buscando todos os seus perfis GBP...");
+      const result = await autoImportMutation.mutateAsync();
+      setSyncStep("Sincronizando avaliações...");
+      await refetch();
+      setSyncDone(result);
+      if (!silent) {
+        toast.success(`✅ ${result.imported} perfis importados · ${result.reviewsSynced} avaliações sincronizadas`);
+      }
+    } catch (e: any) {
+      const msg = e.message || "Erro na sincronização";
+      if (!silent) toast.error(msg);
+      else toast.error(msg);
     }
-  }, []);
+    setSyncing(false);
+    setSyncStep("");
+  };
+
+  // Na primeira carga sem perfis, tenta auto-importar
+  useEffect(() => {
+    if (!isLoading && profiles && profiles.length === 0 && !syncing) {
+      handleAutoImport(true);
+    }
+  }, [isLoading, profiles]);
 
   const filtered = (profiles || []).filter(p =>
     p.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -52,19 +82,13 @@ export default function Dashboard() {
   );
 
   const avgScore = profiles?.length
-    ? Math.round(profiles.reduce((acc, p) => {
-        const s = calcScore(p); return acc + s;
-      }, 0) / profiles.length)
+    ? Math.round(profiles.reduce((a, p) => a + calcScore(p), 0) / profiles.length)
     : 0;
 
-  function calcScore(p: any) {
-    const completeness = Math.min(100, (p.name?15:0)+(p.address?15:0)+(p.phone?15:0)+(p.website?15:0)+(p.description?20:0)+(p.category?10:0)+(p.isVerified?10:0));
-    const reviewScore = Math.min(100, (Math.min(p.totalReviews||0,200)*0.3)+((p.avgRating||0)*14));
-    const engagement = Math.min(100, ((p.avgRating||0)*14)+(Math.min(p.totalReviews||0,100)*0.3)+(Math.min(p.postCount||0,30)*1.2));
-    const consistency = Math.min(100, ((p.avgRating||0)*12)+(p.isVerified?20:0)+(p.phone?12:0)+(p.website?12:0)+(p.description?8:0));
-    const mediaScore = Math.min(100, (Math.min(p.photoCount||0,60)*1.1)+(Math.min(p.postCount||0,30)*1.5));
-    return Math.round(completeness*0.2+reviewScore*0.25+engagement*0.2+consistency*0.2+mediaScore*0.15);
-  }
+  const totalReviews = profiles?.reduce((a, p) => a + (p.totalReviews || 0), 0) || 0;
+  const avgRating = profiles?.length
+    ? (profiles.reduce((a, p) => a + (p.avgRating || 0), 0) / profiles.length).toFixed(1)
+    : "—";
 
   return (
     <DashboardLayout>
@@ -73,14 +97,46 @@ export default function Dashboard() {
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-3xl font-bold">Meus Perfis</h1>
-            <p className="text-muted-foreground mt-1">Gerencie seus perfis do Google Business</p>
+            <p className="text-muted-foreground mt-1">Sincronizado automaticamente com Google Business</p>
           </div>
-          <ImportProfileDialog onSuccess={refetch} />
+          <Button onClick={() => handleAutoImport(false)} disabled={syncing} className="gap-2">
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            {syncing ? "Sincronizando..." : "Sincronizar Tudo"}
+          </Button>
         </div>
+
+        {/* Banner de sync em progresso */}
+        {syncing && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-blue-600 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-blue-800 text-sm">Sincronizando com Google Business...</p>
+              <p className="text-blue-600 text-xs mt-0.5">{syncStep}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Banner de sync concluído */}
+        {syncDone && !syncing && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
+              <div>
+                <p className="font-semibold text-green-800 text-sm">Sincronização concluída!</p>
+                <p className="text-green-600 text-xs mt-0.5">
+                  {syncDone.imported > 0 ? `${syncDone.imported} novos perfis · ` : ""}
+                  {syncDone.skipped > 0 ? `${syncDone.skipped} atualizados · ` : ""}
+                  {syncDone.reviewsSynced} avaliações sincronizadas
+                </p>
+              </div>
+            </div>
+            <button className="text-green-500 hover:text-green-700 text-xs" onClick={() => setSyncDone(null)}>✕</button>
+          </div>
+        )}
 
         {/* Métricas globais */}
         {profiles && profiles.length > 0 && (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Card><CardContent className="pt-4">
               <div className="text-2xl font-bold text-blue-600">{profiles.length}</div>
               <div className="text-xs text-muted-foreground mt-1">Perfis</div>
@@ -90,41 +146,63 @@ export default function Dashboard() {
               <div className="text-xs text-muted-foreground mt-1">Score Médio</div>
             </CardContent></Card>
             <Card><CardContent className="pt-4">
-              <div className="text-2xl font-bold text-yellow-600">
-                {profiles.length > 0 ? (profiles.reduce((a, p) => a + (p.avgRating || 0), 0) / profiles.length).toFixed(1) : "—"}
-              </div>
+              <div className="text-2xl font-bold text-yellow-600">{avgRating}</div>
               <div className="text-xs text-muted-foreground mt-1">Nota Média</div>
+            </CardContent></Card>
+            <Card><CardContent className="pt-4">
+              <div className="text-2xl font-bold text-purple-600">{totalReviews}</div>
+              <div className="text-xs text-muted-foreground mt-1">Avaliações</div>
             </CardContent></Card>
           </div>
         )}
 
         {/* Busca */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Buscar por nome, endereço ou categoria..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
-        </div>
+        {profiles && profiles.length > 0 && (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input placeholder="Buscar por nome, endereço ou categoria..." value={search}
+              onChange={e => setSearch(e.target.value)} className="pl-10" />
+          </div>
+        )}
 
-        {/* Lista de perfis */}
-        {isLoading ? (
-          <div className="flex items-center justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
-        ) : filtered.length === 0 ? (
-          <Card><CardContent className="flex flex-col items-center justify-center py-16 gap-3">
+        {/* Lista */}
+        {(isLoading || syncing) && profiles?.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+            <Loader2 className="w-10 h-10 animate-spin" />
+            <p className="font-medium">Buscando seus perfis do Google Business...</p>
+            <p className="text-sm">Isso pode levar alguns segundos</p>
+          </div>
+        ) : filtered.length === 0 && !syncing ? (
+          <Card><CardContent className="flex flex-col items-center justify-center py-16 gap-4">
             <div className="text-5xl">🏢</div>
-            <p className="text-muted-foreground font-medium">{profiles?.length === 0 ? "Nenhum perfil ainda" : "Nenhum perfil encontrado"}</p>
-            <p className="text-sm text-muted-foreground">{profiles?.length === 0 ? "Clique em \"Importar do Google\" para sincronizar seus perfis" : "Tente outro termo de busca"}</p>
-            {profiles?.length === 0 && <ImportProfileDialog onSuccess={refetch} />}
+            <div className="text-center">
+              <p className="font-semibold text-lg">Nenhum perfil encontrado</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {profiles?.length === 0
+                  ? "Não encontramos perfis Google Business nesta conta."
+                  : "Nenhum perfil corresponde à busca."}
+              </p>
+            </div>
+            {profiles?.length === 0 && (
+              <Button onClick={() => handleAutoImport(false)} disabled={syncing}>
+                <RefreshCw className="w-4 h-4 mr-2" /> Tentar novamente
+              </Button>
+            )}
           </CardContent></Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map(profile => {
               const score = calcScore(profile);
               return (
-                <Card key={profile.id} className="cursor-pointer hover:shadow-lg hover:border-blue-300 transition-all group"
+                <Card key={profile.id}
+                  className="cursor-pointer hover:shadow-lg hover:border-blue-300 transition-all group"
                   onClick={() => setLocation(`/profile/${profile.id}`)}>
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0 pr-3">
-                        <CardTitle className="text-base leading-tight truncate group-hover:text-blue-600 transition-colors">{profile.name}</CardTitle>
+                        <CardTitle className="text-base leading-tight truncate group-hover:text-blue-600 transition-colors">
+                          {profile.name}
+                        </CardTitle>
                         <CardDescription className="text-xs mt-0.5">{profile.category}</CardDescription>
                       </div>
                       <ScoreRing value={score} />
@@ -140,14 +218,19 @@ export default function Dashboard() {
                       <span className="text-xs text-muted-foreground">{profile.totalReviews || 0} avaliações</span>
                     </div>
                     <div className="flex gap-3 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1"><Camera className="w-3 h-3" />{profile.photoCount || 0}</span>
+                      <span className="flex items-center gap-1"><Camera className="w-3 h-3" />{profile.photoCount || 0} fotos</span>
                       <span className="flex items-center gap-1"><FileText className="w-3 h-3" />{profile.postCount || 0} posts</span>
                       {profile.isVerified && <span className="text-green-600 font-medium">✓ Verificado</span>}
                     </div>
-                    {/* Score bar */}
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all" style={{ width: `${score}%`, background: scoreColor(score) }} />
+                      <div className="h-full rounded-full transition-all"
+                        style={{ width: `${score}%`, background: scoreColor(score) }} />
                     </div>
+                    {profile.lastSyncAt && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Sincronizado: {new Date(profile.lastSyncAt).toLocaleDateString("pt-BR")}
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
               );

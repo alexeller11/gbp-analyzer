@@ -400,17 +400,21 @@ Responda com JSON:
           throw new Error("Este perfil foi adicionado manualmente. Reimporte pelo link do Google Maps para sincronizar.");
         }
 
-        // Se temos o placeId, busca dados atualizados
         const placeId = profile.googleLocationId;
         const details = await getPlaceDetails(placeId);
         if (!details) throw new Error("Não foi possível buscar dados atualizados do Google.");
 
-        // Atualiza perfil com dados reais
+        // Atualiza TODOS os campos relevantes do perfil
         await db.updateProfile(input.profileId, {
           totalReviews: details.totalReviews,
           avgRating: details.rating,
           phone: details.phone || profile.phone,
           website: details.website || profile.website,
+          description: details.description || profile.description,
+          photoCount: details.photos?.length || profile.photoCount || 0,
+          latitude: details.lat || profile.latitude,
+          longitude: details.lng || profile.longitude,
+          lastSyncAt: new Date(),
         });
 
         // Salva avaliações reais
@@ -436,9 +440,12 @@ Responda com JSON:
           }
         }
 
-        // Atualiza score
-        const s = calcScore({ totalReviews: details.totalReviews, avgRating: details.rating, website: details.website, phone: details.phone });
-        await db.createScore({ profileId: input.profileId, ...s });
+        // Atualiza score com dados completos
+        const updated = await db.getProfileById(input.profileId);
+        if (updated) {
+          const s = calcScore(updated);
+          await db.createScore({ profileId: input.profileId, ...s });
+        }
 
         return { success: true, reviewCount, rating: details.rating, totalReviews: details.totalReviews };
       }),
@@ -517,55 +524,157 @@ Responda com JSON:
   }),
 
   googleBusiness: router({
+    /** Retorna perfis disponíveis na conta GBP (preview antes de importar) */
     getProfiles: protectedProcedure
       .query(async ({ ctx }) => {
         try {
           const accessToken = await getValidAccessToken(ctx.user.id);
           if (!accessToken) return { profiles: [], error: "Conta Google não conectada. Faça login novamente." };
 
-          const { getBusinessAccounts, getBusinessLocations, getLocationDetails } = await import("./google-mybusiness-api");
-
-          const accountsData = await getBusinessAccounts(accessToken);
-          const accounts = accountsData.accounts || [];
-
-          if (accounts.length === 0) return { profiles: [], error: "Nenhuma conta Google Business encontrada." };
+          const { getBusinessAccounts, getBusinessLocations, parseLocation } = await import("./google-mybusiness-api");
+          const accounts = await getBusinessAccounts(accessToken);
+          if (!accounts.length) return { profiles: [], error: "Nenhuma conta Google Business encontrada." };
 
           const profiles: any[] = [];
-
           for (const account of accounts) {
             const accountId = account.name.split("/")[1];
-            try {
-              const locationsData = await getBusinessLocations(accessToken, accountId) as any;
-              const locations = Array.isArray(locationsData) ? locationsData : (locationsData?.locations || []);
-
-              for (const location of locations) {
-                try {
-                  const details = await getLocationDetails(accessToken, location.name) as any;
-                  profiles.push({
-                    id: location.name,
-                    name: details.displayName || location.displayName || "Sem nome",
-                    category: details.category?.displayName || details.businessType || "Negócio",
-                    address: details.address?.addressLines?.[0] || details.storefrontAddress?.addressLines?.[0] || "Endereço não disponível",
-                    phone: details.phoneNumbers?.[0] || details.primaryPhone || undefined,
-                    website: details.websiteUrl || undefined,
-                    googleLocationId: location.name,
-                    googleAccountId: accountId,
-                    isVerified: details.metadata?.isVerified || false,
-                  });
-                } catch (e) {
-                  console.warn("[GBP] Location detail error:", e);
-                }
-              }
-            } catch (e) {
-              console.warn("[GBP] Locations error for account", accountId, e);
+            const locations = await getBusinessLocations(accessToken, accountId);
+            for (const loc of locations) {
+              const parsed = parseLocation(loc, accountId);
+              profiles.push({ ...parsed, id: loc.name });
             }
           }
-
           return { profiles, error: null };
         } catch (error) {
           console.error("[GBP] getProfiles error:", error);
           return { profiles: [], error: (error as Error).message };
         }
+      }),
+
+    /**
+     * AUTOMAÇÃO MÁXIMA: importa TODOS os perfis da conta GBP,
+     * enriquece com Places API, sincroniza todas as reviews.
+     */
+    autoImport: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        const accessToken = await getValidAccessToken(ctx.user.id);
+        if (!accessToken) throw new Error("Conta Google não conectada.");
+
+        const { getBusinessAccounts, getBusinessLocations, getLocationReviews, parseLocation, enrichWithPlacesData } = await import("./google-mybusiness-api");
+
+        const accounts = await getBusinessAccounts(accessToken);
+        if (!accounts.length) return { imported: 0, skipped: 0, reviewsSynced: 0, profiles: [] };
+
+        let imported = 0, skipped = 0, reviewsSynced = 0;
+        const results: any[] = [];
+
+        for (const account of accounts) {
+          const accountId = account.name.split("/")[1];
+          const rawLocations = await getBusinessLocations(accessToken, accountId);
+          console.log(`[AutoImport] Account ${accountId}: ${rawLocations.length} locations`);
+
+          for (const rawLoc of rawLocations) {
+            try {
+              // Parse dados da GBP API
+              let loc = parseLocation(rawLoc, accountId) as any;
+
+              // Enriquecer com Places API (rating, reviews, fotos, coords)
+              loc = await enrichWithPlacesData(loc);
+
+              // Verifica se já existe no banco (por googleLocationId)
+              const existing = await db.getProfilesByUserId(ctx.user.id)
+                .then(ps => ps.find(p => p.googleLocationId === loc.locationName));
+
+              let profile: any;
+              if (existing) {
+                // Atualiza dados existentes
+                profile = await db.updateProfile(existing.id, {
+                  name: loc.name || existing.name,
+                  category: loc.category || existing.category,
+                  address: loc.address || existing.address,
+                  phone: loc.phone || existing.phone,
+                  website: loc.website || existing.website,
+                  totalReviews: loc.totalReviews ?? existing.totalReviews,
+                  avgRating: loc.avgRating ?? existing.avgRating,
+                  photoCount: loc.photoCount ?? existing.photoCount,
+                  description: loc.description || existing.description,
+                  latitude: loc.lat ?? existing.latitude,
+                  longitude: loc.lng ?? existing.longitude,
+                  isVerified: loc.isVerified ?? existing.isVerified,
+                  lastSyncAt: new Date(),
+                });
+                skipped++;
+              } else {
+                // Cria novo perfil
+                profile = await db.createProfile({
+                  userId: ctx.user.id,
+                  googleAccountId: accountId,
+                  googleLocationId: loc.locationName,
+                  name: loc.name || "Sem nome",
+                  category: loc.category || "Negócio",
+                  address: loc.address || "",
+                  phone: loc.phone || null,
+                  website: loc.website || null,
+                  description: loc.description || null,
+                  latitude: loc.lat || 0,
+                  longitude: loc.lng || 0,
+                  isVerified: loc.isVerified || false,
+                  totalReviews: loc.totalReviews || 0,
+                  avgRating: loc.avgRating || 0,
+                  photoCount: loc.photoCount || 0,
+                  lastSyncAt: new Date(),
+                });
+                imported++;
+              }
+
+              // Calcula score
+              const s = calcScore(profile);
+              await db.createScore({ profileId: profile.id, ...s });
+
+              // Sincroniza reviews via GBP API (sem limite)
+              let locReviewCount = 0;
+              try {
+                const reviews = await getLocationReviews(accessToken, loc.locationName);
+                for (const rv of reviews) {
+                  try {
+                    await db.createReview({
+                      profileId: profile.id,
+                      googleReviewId: rv.name,
+                      authorName: rv.reviewer?.displayName || "Anônimo",
+                      authorPhoto: rv.reviewer?.profilePhotoUrl || null,
+                      rating: rv.starRating || 0,
+                      comment: rv.comment || null,
+                      reply: rv.reviewReply?.comment || null,
+                      sentiment: (rv.starRating || 0) >= 4 ? "positive" : (rv.starRating || 0) <= 2 ? "negative" : "neutral",
+                      publishedAt: new Date(rv.createTime),
+                    });
+                    locReviewCount++;
+                  } catch {}
+                }
+                reviewsSynced += locReviewCount;
+              } catch (e) {
+                console.warn("[AutoImport] Reviews error for", loc.locationName, e);
+              }
+
+              // Atualiza contadores finais com reviews reais do banco
+              const allReviews = await db.getReviewsByProfileId(profile.id);
+              if (allReviews.length > 0) {
+                const avgRating = allReviews.reduce((s, r) => s + (r.rating || 0), 0) / allReviews.length;
+                await db.updateProfile(profile.id, {
+                  totalReviews: allReviews.length,
+                  avgRating: Math.round(avgRating * 10) / 10,
+                });
+              }
+
+              results.push({ name: profile.name, profileId: profile.id, reviews: locReviewCount });
+              console.log(`[AutoImport] ✅ ${profile.name}: ${locReviewCount} reviews`);
+            } catch (e) {
+              console.error("[AutoImport] Error for location", rawLoc.name, e);
+            }
+          }
+        }
+
+        return { imported, skipped, reviewsSynced, profiles: results };
       }),
 
     getOAuthUrl: publicProcedure
@@ -729,20 +838,26 @@ Responda APENAS com JSON:
         const respondedReviews = reviews.filter(r => r.reply).length;
 
         // Auto-detecta quais itens estão concluídos com base nos dados reais
+        const hasPhotos = (profile.photoCount || 0) >= 1; // Places API retorna até 5 fotos, qualquer número conta
+        const hasDescription = !!profile.description && (profile.description?.length || 0) > 10;
+        const hasGoodCategory = !!profile.category && !["Estabelecimento", "Negócio", "establishment", "point_of_interest"].includes(profile.category);
+
         return {
           items: [
             { id: "name",        group: "Perfil",      label: "Nome do negócio preenchido",        done: !!profile.name },
-            { id: "category",    group: "Perfil",      label: "Categoria definida",                done: !!profile.category && profile.category !== "Estabelecimento" },
+            { id: "category",    group: "Perfil",      label: "Categoria definida",                done: !!profile.category },
             { id: "address",     group: "Perfil",      label: "Endereço completo",                 done: !!profile.address },
             { id: "phone",       group: "Perfil",      label: "Telefone adicionado",               done: !!profile.phone },
             { id: "website",     group: "Perfil",      label: "Site vinculado",                    done: !!profile.website },
-            { id: "description", group: "Perfil",      label: "Descrição do negócio",              done: !!profile.description && (profile.description?.length || 0) > 50 },
-            { id: "verified",    group: "Perfil",      label: "Perfil verificado",                 done: !!profile.isVerified },
-            { id: "photos",      group: "Conteúdo",    label: "Pelo menos 5 fotos",                done: (profile.photoCount || 0) >= 5 },
+            { id: "description", group: "Perfil",      label: "Descrição do negócio",              done: hasDescription },
+            { id: "verified",    group: "Perfil",      label: "Perfil verificado no Google",       done: !!profile.isVerified },
+            { id: "photos",      group: "Conteúdo",    label: "Fotos adicionadas",                 done: hasPhotos },
+            { id: "photos_10",   group: "Conteúdo",    label: "Mais de 10 fotos",                  done: (profile.photoCount || 0) >= 10 },
             { id: "posts",       group: "Conteúdo",    label: "Pelo menos 1 post publicado",       done: (profile.postCount || 0) >= 1 },
             { id: "reviews_10",  group: "Avaliações",  label: "Mais de 10 avaliações",             done: (profile.totalReviews || 0) >= 10 },
             { id: "reviews_50",  group: "Avaliações",  label: "Mais de 50 avaliações",             done: (profile.totalReviews || 0) >= 50 },
             { id: "rating_4",    group: "Avaliações",  label: "Nota média acima de 4.0",           done: (profile.avgRating || 0) >= 4.0 },
+            { id: "rating_45",   group: "Avaliações",  label: "Nota média acima de 4.5",           done: (profile.avgRating || 0) >= 4.5 },
             { id: "responses",   group: "Avaliações",  label: "Respondeu pelo menos 1 avaliação",  done: respondedReviews >= 1 },
             { id: "response_50", group: "Avaliações",  label: "Taxa de resposta acima de 50%",     done: reviews.length > 0 && (respondedReviews / reviews.length) >= 0.5 },
             { id: "competitors", group: "Análise",     label: "Concorrentes mapeados",             done: competitors.length >= 3 },
