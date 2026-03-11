@@ -1045,51 +1045,75 @@ Responda APENAS com JSON válido:
         const positiveReviews = reviews.filter(r => r.sentiment === "positive").length;
         const negativeReviews = reviews.filter(r => r.sentiment === "negative").length;
         const neutralReviews = reviews.filter(r => r.sentiment === "neutral").length;
+        const unanswered = reviews.filter(r => !r.reply).length;
         const total = reviews.length || 1;
 
-        // Calcula posição local baseada nos concorrentes
         const allRatings = [profile.avgRating || 0, ...competitors.map((c: any) => c.rating || 0)].sort((a, b) => b - a);
         const localRank = allRatings.indexOf(profile.avgRating || 0) + 1;
-
-        // Extrai temas das reviews
+        const topCompetitor = competitors.sort((a: any, b: any) => (b.rating || 0) - (a.rating || 0))[0];
         const allText = reviews.map(r => r.comment || "").join(" ");
         const themes = extractKeywords(allText).slice(0, 8);
 
-        const prompt = `Gere um relatório estratégico completo para "${profile.name}" (${profile.category}).
+        // Análise de velocidade de reviews
+        const now = new Date();
+        const last30Reviews = reviews.filter(r => {
+          const d = new Date(r.publishedAt);
+          return (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24) <= 30;
+        }).length;
 
-DADOS:
-- Score GBP: ${score?.totalScore || 0}/100
-- Nota: ${profile.avgRating || 0} (${profile.totalReviews || 0} avaliações)
-- Reviews positivas: ${positiveReviews}, neutras: ${neutralReviews}, negativas: ${negativeReviews}
-- Concorrentes: ${competitors.length}
-- Posição local estimada: #${localRank}
-- Tem site: ${!!profile.website}, tem descrição: ${!!profile.description}
+        const prompt = `Gere um relatório estratégico completo para "${profile.name}" (${profile.category}) em português.
+
+DADOS DO PERFIL:
+- Score GBP: ${score?.totalScore || score?.total || 0}/100
+- Nota média: ${profile.avgRating || 0}⭐ (${profile.totalReviews || 0} avaliações)
+- Reviews: ${positiveReviews} positivas · ${neutralReviews} neutras · ${negativeReviews} negativas
+- Sem resposta: ${unanswered} avaliações
+- Avaliações últimos 30 dias: ${last30Reviews}
+- Fotos: ${profile.photoCount || 0} | Posts: ${profile.postCount || 0}
+- Website: ${profile.website || "não"} | Descrição: ${profile.description ? "sim" : "não"}
+- Verificado: ${profile.isVerified ? "sim" : "não"}
+- Temas nas avaliações: ${themes.join(", ")}
+
+CONTEXTO COMPETITIVO:
+- Posição local: #${localRank} de ${allRatings.length} negócios
+- Concorrentes cadastrados: ${competitors.length}
+- Líder do mercado: ${topCompetitor ? `${topCompetitor.name} (${topCompetitor.rating}⭐, ${topCompetitor.reviewCount} av.)` : "sem dados"}
+- Gap de nota: ${topCompetitor ? ((topCompetitor.rating || 0) - (profile.avgRating || 0)).toFixed(1) : "0"}
 
 Responda APENAS com JSON válido:
 {
-  "overallScore": ${score?.totalScore || 0},
+  "overallScore": ${score?.totalScore || score?.total || 0},
   "localRank": ${localRank},
+  "rankTotal": ${allRatings.length},
+  "marketStatus": "líder|competitivo|em risco|crítico",
   "diagnosis": [
-    {"item": "nome do item", "status": "ok|warn|fail", "detail": "detalhe"},
-    ...mínimo 6 itens
+    {"item": "nome do item", "status": "ok|warn|fail", "detail": "detalhe específico com número quando possível"},
+    ... mínimo 8 itens cobrindo: nota, avaliações, respostas, fotos, descrição, posts, verificação, velocidade de reviews
   ],
   "sentiment": {
     "positive": ${Math.round((positiveReviews/total)*100)},
     "neutral": ${Math.round((neutralReviews/total)*100)},
     "negative": ${Math.round((negativeReviews/total)*100)},
-    "themes": ${JSON.stringify(themes)}
+    "themes": ${JSON.stringify(themes)},
+    "topComplaint": "principal reclamação identificada nas reviews negativas (se houver)"
+  },
+  "competitiveGap": {
+    "ratingGap": ${topCompetitor ? ((topCompetitor.rating || 0) - (profile.avgRating || 0)).toFixed(2) : 0},
+    "reviewGap": ${topCompetitor ? (topCompetitor.reviewCount || 0) - (profile.totalReviews || 0) : 0},
+    "toClose": "o que fazer para fechar o gap em 90 dias"
   },
   "actionPlan": [
-    {"action": "ação concreta", "why": "por que é importante", "priority": "alta|media|baixa"},
-    ...mínimo 6 ações ordenadas por prioridade
-  ]
+    {"action": "ação muito concreta com número/meta", "why": "impacto esperado mensurável", "priority": "alta|media|baixa", "timeframe": "1 semana|2 semanas|1 mês|3 meses"},
+    ... mínimo 7 ações ordenadas por prioridade, com foco em resultados mensuráveis
+  ],
+  "quickWins": ["ação que pode ser feita hoje", "ação que pode ser feita essa semana"],
+  "forecast": "previsão do que acontece com o perfil nos próximos 90 dias se nada for feito"
 }`;
 
         const raw = await callGroqAPI([
-          { role: "system", content: "Você é consultor especialista em Google Business Profile. Responda APENAS com JSON válido." },
+          { role: "system", content: "Você é consultor sênior especialista em Google Business Profile e SEO local. Responda APENAS com JSON válido, sem markdown. Seja específico e use números reais." },
           { role: "user", content: prompt },
         ]);
-
         const clean = raw.replace(/```json\n?|```/g, "").trim();
         return JSON.parse(clean);
       }),
