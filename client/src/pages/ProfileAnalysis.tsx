@@ -156,6 +156,7 @@ export default function ProfileAnalysis({ params }: Props) {
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/charts`)}>📊 Gráficos</Button>
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/ai-search`)}>🧠 AI Search</Button>
             <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/report`)}>📄 Relatório</Button>
+            <Button variant="outline" onClick={() => setLocation(`/profile/${profileId}/checklist`)}>✅ Checklist</Button>
             <Button variant="destructive" size="sm" onClick={handleDelete}>🗑</Button>
           </div>
         </div>

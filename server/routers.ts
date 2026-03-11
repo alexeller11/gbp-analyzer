@@ -312,7 +312,7 @@ Perfil analisado:
         }
 
         // Busca concorrentes reais via Places API
-        const nearby = await getNearbyCompetitors(lat, lng, profile.category, profile.googleLocationId);
+        const nearby = await getNearbyCompetitors(lat, lng, profile.category, profile.googleLocationId, profile.name);
 
         if (nearby.length === 0) return { competitors: [], message: "Nenhum concorrente encontrado próximo." };
 
@@ -714,6 +714,43 @@ Responda APENAS com JSON:
         ]);
         const clean = raw.replace(/```json\n?|```/g, "").trim();
         return JSON.parse(clean);
+      }),
+  }),
+
+  profileChecklist: router({
+    getStatus: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .query(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        const reviews = await db.getReviewsByProfileId(input.profileId);
+        const competitors = await db.getCompetitorsByProfileId(input.profileId);
+        const score = await db.getScoreByProfileId(input.profileId);
+        const respondedReviews = reviews.filter(r => r.reply).length;
+
+        // Auto-detecta quais itens estão concluídos com base nos dados reais
+        return {
+          items: [
+            { id: "name",        group: "Perfil",      label: "Nome do negócio preenchido",        done: !!profile.name },
+            { id: "category",    group: "Perfil",      label: "Categoria definida",                done: !!profile.category && profile.category !== "Estabelecimento" },
+            { id: "address",     group: "Perfil",      label: "Endereço completo",                 done: !!profile.address },
+            { id: "phone",       group: "Perfil",      label: "Telefone adicionado",               done: !!profile.phone },
+            { id: "website",     group: "Perfil",      label: "Site vinculado",                    done: !!profile.website },
+            { id: "description", group: "Perfil",      label: "Descrição do negócio",              done: !!profile.description && (profile.description?.length || 0) > 50 },
+            { id: "verified",    group: "Perfil",      label: "Perfil verificado",                 done: !!profile.isVerified },
+            { id: "photos",      group: "Conteúdo",    label: "Pelo menos 5 fotos",                done: (profile.photoCount || 0) >= 5 },
+            { id: "posts",       group: "Conteúdo",    label: "Pelo menos 1 post publicado",       done: (profile.postCount || 0) >= 1 },
+            { id: "reviews_10",  group: "Avaliações",  label: "Mais de 10 avaliações",             done: (profile.totalReviews || 0) >= 10 },
+            { id: "reviews_50",  group: "Avaliações",  label: "Mais de 50 avaliações",             done: (profile.totalReviews || 0) >= 50 },
+            { id: "rating_4",    group: "Avaliações",  label: "Nota média acima de 4.0",           done: (profile.avgRating || 0) >= 4.0 },
+            { id: "responses",   group: "Avaliações",  label: "Respondeu pelo menos 1 avaliação",  done: respondedReviews >= 1 },
+            { id: "response_50", group: "Avaliações",  label: "Taxa de resposta acima de 50%",     done: reviews.length > 0 && (respondedReviews / reviews.length) >= 0.5 },
+            { id: "competitors", group: "Análise",     label: "Concorrentes mapeados",             done: competitors.length >= 3 },
+            { id: "score_50",    group: "Análise",     label: "Score GBP acima de 50",             done: (score?.total || 0) >= 50 },
+            { id: "score_75",    group: "Análise",     label: "Score GBP acima de 75",             done: (score?.total || 0) >= 75 },
+          ],
+          profile: { name: profile.name, avgRating: profile.avgRating, totalReviews: profile.totalReviews, score: score?.total || 0 },
+        };
       }),
   }),
 

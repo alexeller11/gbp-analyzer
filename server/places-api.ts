@@ -110,13 +110,35 @@ async function findPlaceByText(query: string, lat?: number, lng?: number): Promi
 /** Busca detalhes completos de um lugar */
 export async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
   const fields = "place_id,name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,geometry,photos,opening_hours,reviews,types,editorial_summary";
-  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=${fields}&key=${PLACES_API_KEY}&language=pt-BR&reviews_sort=newest`;
+  
+  // Busca reviews com dois sorts diferentes para tentar pegar mais que 5
+  const fetchDetails = async (sort: "newest" | "most_relevant") => {
+    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=${fields}&key=${PLACES_API_KEY}&language=pt-BR&reviews_sort=${sort}`;
+    const res = await fetch(url);
+    return res.json();
+  };
 
-  const res = await fetch(url);
-  const data = await res.json();
+  const [dataNewer, dataMostRelevant] = await Promise.all([
+    fetchDetails("newest"),
+    fetchDetails("most_relevant"),
+  ]);
+
+  const data = dataNewer;
   if (data.status !== "OK" || !data.result) return null;
 
   const r = data.result;
+
+  // Combina reviews dos dois sorts, deduplica por autor+tempo
+  const reviewsMap = new Map<string, any>();
+  const addReviews = (reviews: any[]) => {
+    for (const rv of (reviews || [])) {
+      const key = `${rv.author_name}_${rv.time}`;
+      if (!reviewsMap.has(key)) reviewsMap.set(key, rv);
+    }
+  };
+  addReviews(dataNewer.result?.reviews || []);
+  addReviews(dataMostRelevant.result?.reviews || []);
+
   return {
     placeId,
     name: r.name,
@@ -132,7 +154,7 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceResult | nu
       `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference=${p.photo_reference}&key=${PLACES_API_KEY}`
     ),
     hours: r.opening_hours?.weekday_text,
-    reviews: r.reviews?.map((rv: any) => ({
+    reviews: Array.from(reviewsMap.values()).map((rv: any) => ({
       author: rv.author_name,
       rating: rv.rating,
       text: rv.text,
@@ -144,26 +166,57 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceResult | nu
 }
 
 /** Busca concorrentes próximos */
-export async function getNearbyCompetitors(lat: number, lng: number, category: string, excludePlaceId?: string): Promise<PlaceResult[]> {
+export async function getNearbyCompetitors(
+  lat: number, lng: number, category: string,
+  excludePlaceId?: string, businessName?: string
+): Promise<PlaceResult[]> {
   const key = PLACES_API_KEY;
   if (!key) throw new Error("GOOGLE_PLACES_API_KEY não configurada");
 
-  // Usa textsearch com a categoria e localização — mais confiável que nearbysearch com type
-  const query = encodeURIComponent(category);
   const location = `${lat},${lng}`;
-  const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&location=${location}&radius=3000&key=${key}&language=pt-BR`;
+  const allResults: any[] = [];
 
-  const res = await fetch(url);
-  const data = await res.json();
-  console.log("[Competitors] textsearch status:", data.status, "results:", data.results?.length);
+  // Estratégia 1: busca pela categoria do negócio
+  const catQuery = category && category !== "Estabelecimento" && category !== "Negócio"
+    ? category
+    : businessName?.split(" ").slice(-2).join(" ") || "loja";
 
-  if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
-    console.error("[Competitors] API error:", data.error_message);
-    return [];
+  const url1 = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(catQuery)}&location=${location}&radius=5000&key=${key}&language=pt-BR`;
+  const r1 = await fetch(url1);
+  const d1 = await r1.json();
+  console.log("[Competitors] query1:", catQuery, "status:", d1.status, "results:", d1.results?.length);
+  if (d1.results) allResults.push(...d1.results);
+
+  // Estratégia 2: nearbysearch por tipo se tiver poucos resultados
+  if (allResults.length < 3) {
+    const typeMap: Record<string, string> = {
+      restaurante: "restaurant", academia: "gym", farmácia: "pharmacy",
+      hotel: "lodging", supermercado: "supermarket", dentista: "dentist",
+      materiais: "hardware_store", construção: "hardware_store",
+      padaria: "bakery", bar: "bar", café: "cafe", loja: "store",
+      salão: "beauty_salon", cabelereiro: "hair_care", clínica: "doctor",
+    };
+    const catLower = (category + " " + (businessName || "")).toLowerCase();
+    let type = "store";
+    for (const [k, v] of Object.entries(typeMap)) {
+      if (catLower.includes(k)) { type = v; break; }
+    }
+    const url2 = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location}&radius=5000&type=${type}&key=${key}&language=pt-BR`;
+    const r2 = await fetch(url2);
+    const d2 = await r2.json();
+    console.log("[Competitors] nearbysearch type:", type, "status:", d2.status, "results:", d2.results?.length);
+    if (d2.results) allResults.push(...d2.results);
   }
 
-  const competitors = (data.results || [])
-    .filter((p: any) => p.place_id !== excludePlaceId)
+  // Deduplica e filtra o próprio negócio
+  const seen = new Set<string>();
+  return allResults
+    .filter((p: any) => {
+      if (!p.place_id || p.place_id === excludePlaceId) return false;
+      if (seen.has(p.place_id)) return false;
+      seen.add(p.place_id);
+      return true;
+    })
     .slice(0, 6)
     .map((p: any) => ({
       placeId: p.place_id,
@@ -175,8 +228,6 @@ export async function getNearbyCompetitors(lat: number, lng: number, category: s
       lat: p.geometry?.location?.lat,
       lng: p.geometry?.location?.lng,
     }));
-
-  return competitors;
 }
 
 /** Busca detalhes de múltiplos concorrentes (com avaliações) */
