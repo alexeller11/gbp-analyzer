@@ -280,6 +280,61 @@ Perfil analisado:
       .input(z.object({ profileId: z.number() }))
       .query(async ({ input }) => db.getCompetitorsByProfileId(input.profileId)),
 
+    // Busca concorrente por nome/URL para adicionar manualmente
+    searchByName: protectedProcedure
+      .input(z.object({ query: z.string(), profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const key = process.env.GOOGLE_PLACES_API_KEY;
+        if (!key) throw new Error("GOOGLE_PLACES_API_KEY não configurada");
+
+        const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(input.query)}&key=${key}&language=pt-BR`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.status !== "OK" || !data.results?.length) {
+          throw new Error("Nenhum negócio encontrado. Tente ser mais específico.");
+        }
+
+        // Retorna os top 5 resultados para o usuário escolher
+        return data.results.slice(0, 5).map((p: any) => ({
+          placeId: p.place_id,
+          name: p.name,
+          address: p.formatted_address || p.vicinity,
+          rating: p.rating,
+          reviewCount: p.user_ratings_total,
+          category: p.types?.[0]?.replace(/_/g, " ") || "Negócio",
+        }));
+      }),
+
+    // Adiciona concorrente escolhido ao perfil
+    addByPlaceId: protectedProcedure
+      .input(z.object({ profileId: z.number(), placeId: z.string() }))
+      .mutation(async ({ input }) => {
+        const details = await getPlaceDetails(input.placeId);
+        if (!details) throw new Error("Não foi possível buscar detalhes do concorrente.");
+        const comp = await db.createCompetitor({
+          profileId: input.profileId,
+          placeId: input.placeId,
+          name: details.name,
+          address: details.address,
+          rating: details.rating,
+          reviewCount: details.totalReviews,
+          category: details.category,
+        });
+        return comp;
+      }),
+
+    // Remove concorrente
+    remove: protectedProcedure
+      .input(z.object({ competitorId: z.number() }))
+      .mutation(async ({ input }) => {
+        const db2 = await import("./db");
+        const drizzleDb = await db2.getDb();
+        const { competitors: compTable } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        if (drizzleDb) await drizzleDb.delete(compTable).where(eq(compTable.id, input.competitorId));
+        return { success: true };
+      }),
+
     fetchReal: protectedProcedure
       .input(z.object({ profileId: z.number() }))
       .mutation(async ({ input }) => {
@@ -289,53 +344,37 @@ Perfil analisado:
         let lat = profile.latitude;
         let lng = profile.longitude;
 
-        // Se não tem coordenadas, geocodifica pelo endereço
         if (!lat || !lng || lat === 0 || lng === 0) {
           if (profile.googleLocationId && !profile.googleLocationId.startsWith("manual_") && !profile.googleLocationId.startsWith("places_")) {
-            // Busca coordenadas via place details
             const details = await getPlaceDetails(profile.googleLocationId);
             if (details?.lat && details?.lng) {
-              lat = details.lat;
-              lng = details.lng;
+              lat = details.lat; lng = details.lng;
               await db.updateProfile(input.profileId, { latitude: lat, longitude: lng });
             }
           }
           if (!lat || !lng) {
-            // Geocodifica pelo endereço
             const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(profile.address || profile.name)}&key=${process.env.GOOGLE_PLACES_API_KEY}`;
             const geoRes = await fetch(geoUrl);
             const geoData = await geoRes.json();
             const loc = geoData.results?.[0]?.geometry?.location;
             if (loc) { lat = loc.lat; lng = loc.lng; await db.updateProfile(input.profileId, { latitude: lat, longitude: lng }); }
           }
-          if (!lat || !lng) throw new Error("Não foi possível determinar a localização do perfil. Verifique o endereço.");
+          if (!lat || !lng) throw new Error("Não foi possível determinar a localização do perfil.");
         }
 
-        // Busca concorrentes reais via Places API
         const nearby = await getNearbyCompetitors(lat, lng, profile.category, profile.googleLocationId, profile.name);
-
         if (nearby.length === 0) return { competitors: [], message: "Nenhum concorrente encontrado próximo." };
 
-        // Busca detalhes com avaliações
         const details = await getCompetitorDetails(nearby.map(c => c.placeId));
-
-        // Salva no banco (createCompetitor já faz upsert)
         for (const comp of details) {
           try {
             await db.createCompetitor({
-              profileId: input.profileId,
-              placeId: comp.placeId,
-              name: comp.name,
-              address: comp.address,
-              rating: comp.rating,
-              reviewCount: comp.totalReviews,
-              category: comp.category,
+              profileId: input.profileId, placeId: comp.placeId,
+              name: comp.name, address: comp.address,
+              rating: comp.rating, reviewCount: comp.totalReviews, category: comp.category,
             });
-          } catch (e: any) {
-            console.warn("[Competitors] insert error:", e?.message);
-          }
+          } catch (e: any) { console.warn("[Competitors] insert error:", e?.message); }
         }
-
         return { competitors: details, message: `${details.length} concorrentes encontrados!` };
       }),
 
@@ -345,39 +384,46 @@ Perfil analisado:
         const profile = await db.getProfileById(input.profileId);
         if (!profile) throw new Error("Perfil não encontrado");
         const competitors = await db.getCompetitorsByProfileId(input.profileId);
-        if (competitors.length === 0) throw new Error("Busque os concorrentes primeiro.");
+        if (competitors.length === 0) throw new Error("Adicione pelo menos 1 concorrente primeiro.");
 
         const myReviews = await db.getReviewsByProfileId(input.profileId);
         const myKeywords = extractKeywords(myReviews.map(r => r.comment || "").join(" "));
 
-        const prompt = `Analise estes dados de competitividade para "${profile.name}" e gere uma análise estratégica completa em português.
+        const compList = competitors.slice(0, 5).map((c: any, i: number) =>
+          `${i+1}. ${c.name}: ${c.rating || "N/A"}⭐ (${c.reviewCount || 0} avaliações) - ${c.address || ""}`
+        ).join("\n");
+
+        const prompt = `Analise estes dados competitivos para "${profile.name}" e gere análise estratégica completa em português.
 
 MEU PERFIL:
-- Nota: ${profile.avgRating || "N/A"} (${profile.totalReviews || 0} avaliações)
-- Categoria: ${profile.category}
+- Nome: ${profile.name} | Categoria: ${profile.category}
+- Nota: ${profile.avgRating || "N/A"}⭐ (${profile.totalReviews || 0} avaliações)
 - Endereço: ${profile.address}
+- Website: ${profile.website || "não tem"} | Verificado: ${profile.isVerified ? "Sim" : "Não"}
 - Palavras-chave nas avaliações: ${myKeywords.slice(0,10).join(", ")}
 
 CONCORRENTES:
-${competitors.slice(0,5).map((c, i) => `${i+1}. ${c.name}: ${c.avgRating || "N/A"}⭐ (${c.totalReviews || 0} avaliações)`).join("\n")}
+${compList}
 
-Responda com JSON:
+Responda com JSON válido:
 {
-  "position": "sua posição no ranking (1-${competitors.length + 1})",
+  "position": número_da_posição_no_ranking,
+  "summary": "resumo executivo em 2 frases",
   "strengths": ["ponto forte 1", "ponto forte 2", "ponto forte 3"],
   "weaknesses": ["ponto fraco 1", "ponto fraco 2"],
   "opportunities": ["oportunidade 1", "oportunidade 2", "oportunidade 3"],
   "actions": ["ação prioritária 1", "ação prioritária 2", "ação prioritária 3", "ação prioritária 4"],
-  "reviewGap": ${(competitors[0]?.totalReviews || 0) - (profile.totalReviews || 0)},
-  "ratingGap": ${((competitors[0]?.avgRating || 0) - (profile.avgRating || 0)).toFixed(1)},
-  "summary": "resumo executivo em 2-3 frases"
+  "competitorInsights": [
+    {"name": "nome concorrente", "threat": "alto|médio|baixo", "insight": "o que ele faz melhor"}
+  ],
+  "reviewGap": diferença_de_avaliações_com_líder,
+  "ratingGap": diferença_de_nota_com_líder
 }`;
 
         const raw = await callGroqAPI([
-          { role: "system", content: "Você é especialista em SEO local e Google Business Profile. Responda APENAS com JSON válido." },
+          { role: "system", content: "Você é especialista em SEO local e Google Business Profile. Responda APENAS com JSON válido, sem markdown." },
           { role: "user", content: prompt },
         ]);
-
         const clean = raw.replace(/```json\n?|```/g, "").trim();
         return JSON.parse(clean);
       }),
