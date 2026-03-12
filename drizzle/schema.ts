@@ -8,6 +8,7 @@ import {
   real,
   integer,
   serial,
+  unique,
 } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("role", ["user", "admin"]);
@@ -177,7 +178,7 @@ export type InsertGoogleAccount = typeof googleAccounts.$inferInsert;
 
 export const googleTokens = pgTable("google_tokens", {
   id: serial("id").primaryKey(),
-  userId: integer("userId").notNull(),
+  userId: integer("userId").notNull().unique(),
   googleAccountId: varchar("googleAccountId", { length: 255 }).notNull(),
   accessToken: text("accessToken").notNull(),
   refreshToken: text("refreshToken"),
@@ -232,3 +233,53 @@ export const syncLogs = pgTable("sync_logs", {
 
 export type SyncLog = typeof syncLogs.$inferSelect;
 export type InsertSyncLog = typeof syncLogs.$inferInsert;
+
+// ── Histórico de score (snapshot semanal) ──────────────────────
+export const scoreHistory = pgTable("score_history", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profileId").notNull(),
+  total: real("total").notNull(),
+  completeness: real("completeness").notNull(),
+  reviewScore: real("reviewScore").notNull(),
+  engagement: real("engagement").notNull(),
+  consistency: real("consistency").notNull(),
+  mediaScore: real("mediaScore").notNull(),
+  snapshotAt: timestamp("snapshotAt").defaultNow().notNull(),
+});
+export type ScoreHistory = typeof scoreHistory.$inferSelect;
+
+// ── Histórico de geo-grid ──────────────────────────────────────
+export const geoGridHistory = pgTable("geo_grid_history", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profileId").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  avgRank: real("avgRank"),
+  top3Pct: real("top3Pct"),
+  pointsJson: text("pointsJson").notNull(), // JSON serializado
+  scannedAt: timestamp("scannedAt").defaultNow().notNull(),
+});
+export type GeoGridHistory = typeof geoGridHistory.$inferSelect;
+
+// ── Tokens de relatório público ────────────────────────────────
+export const publicReports = pgTable("public_reports", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profileId").notNull(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  reportJson: text("reportJson").notNull(),
+  expiresAt: timestamp("expiresAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PublicReport = typeof publicReports.$inferSelect;
+
+// ── Configurações de alerta ────────────────────────────────────
+export const alertSettings = pgTable("alert_settings", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().unique(),
+  emailAlerts: boolean("emailAlerts").default(false),
+  webhookUrl: text("webhookUrl"), // WhatsApp/Slack webhook
+  alertOnNegative: boolean("alertOnNegative").default(true),
+  alertOnNewReview: boolean("alertOnNewReview").default(false),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type AlertSetting = typeof alertSettings.$inferSelect;

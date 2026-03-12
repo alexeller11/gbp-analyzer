@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { ArrowLeft, Loader2, FileText, Download, CheckCircle2, XCircle, AlertCircle, TrendingUp, Zap, Clock } from "lucide-react";
 import { useLocation } from "wouter";
 import { useState, useEffect } from "react";
+import { Link2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface Props { params: { profileId: string } }
@@ -35,6 +36,22 @@ export default function ReportGenerator({ params }: Props) {
   const { data: profile } = trpc.profiles.getById.useQuery({ id: profileId });
   const { data: score } = trpc.scores.getByProfile.useQuery({ profileId });
   const generateMutation = trpc.report.generate.useMutation();
+  const publicReportMutation = trpc.publicReport.generate.useMutation();
+  const [publicUrl, setPublicUrl] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+
+  const handleShare = async () => {
+    if (!profileId) return;
+    setSharing(true);
+    try {
+      const res = await publicReportMutation.mutateAsync({ profileId });
+      const fullUrl = `${window.location.origin}/public/report/${res.token}`;
+      setPublicUrl(fullUrl);
+      navigator.clipboard.writeText(fullUrl);
+      toast.success("Link copiado! Válido por 30 dias.");
+    } catch (e: any) { toast.error(e.message); }
+    setSharing(false);
+  };
 
   // Auto-gera ao abrir
   useEffect(() => {
@@ -72,11 +89,15 @@ export default function ReportGenerator({ params }: Props) {
                 Regenerar
               </Button>
             )}
-            {report && (
+            {report && (<div className="flex gap-2">
+              <Button onClick={handleShare} variant="outline" size="sm" disabled={sharing} className="gap-1.5">
+                {sharing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                Compartilhar
+              </Button>
               <Button onClick={() => window.print()} variant="outline" size="sm">
                 <Download className="w-4 h-4 mr-2" /> PDF
               </Button>
-            )}
+            </div>)}
           </div>
         </div>
 
@@ -89,6 +110,19 @@ export default function ReportGenerator({ params }: Props) {
               <p className="text-sm text-muted-foreground mt-1">Analisando {profile?.totalReviews || 0} avaliações e dados do perfil</p>
             </CardContent>
           </Card>
+        )}
+
+        {publicUrl && (
+          <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Link2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+              <span className="text-sm text-green-800 font-medium truncate">{publicUrl}</span>
+            </div>
+            <Button size="sm" variant="ghost" className="flex-shrink-0 h-7 text-xs"
+              onClick={() => { navigator.clipboard.writeText(publicUrl); toast.success("Copiado!"); }}>
+              Copiar
+            </Button>
+          </div>
         )}
 
         {report && !loading && (<>

@@ -112,6 +112,26 @@ export default function ProfileAnalysis({ params }: Props) {
     });
   }, [reviews]);
 
+  // ── Comparativo mês atual vs mês anterior ────────────────────
+  const periodComparison = useMemo(() => {
+    const rv = reviews || [];
+    const now = new Date();
+    const thisMonth = rv.filter((r: any) => {
+      const d = new Date(r.publishedAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+    const lastMonth = rv.filter((r: any) => {
+      const d = new Date(r.publishedAt);
+      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear();
+    });
+    const avgThis = thisMonth.length > 0 ? thisMonth.reduce((s: number, r: any) => s + (r.rating || 0), 0) / thisMonth.length : null;
+    const avgLast = lastMonth.length > 0 ? lastMonth.reduce((s: number, r: any) => s + (r.rating || 0), 0) / lastMonth.length : null;
+    return { thisMonth: thisMonth.length, lastMonth: lastMonth.length, avgThis, avgLast,
+      countDiff: thisMonth.length - lastMonth.length,
+      ratingDiff: avgThis && avgLast ? avgThis - avgLast : null };
+  }, [reviews]);
+
   // ── Handlers ──────────────────────────────────────────────────
   const handleCompSearch = async () => {
     if (!compQuery.trim()) return;
@@ -219,7 +239,6 @@ export default function ProfileAnalysis({ params }: Props) {
     { label: "🧠 AI Search", route: "ai-search" },
     { label: "📄 Relatório", route: "report" },
     { label: "✅ Checklist", route: "checklist" },
-    { label: "📍 Geo-Grid", route: "geo-grid" },
   ];
 
   return (
@@ -482,6 +501,35 @@ export default function ProfileAnalysis({ params }: Props) {
                 <div className="text-xs text-muted-foreground mt-0.5">Taxa resposta</div>
               </CardContent></Card>
             </div>
+
+            {/* Comparativo de período */}
+            {(periodComparison.thisMonth > 0 || periodComparison.lastMonth > 0) && (
+              <Card className="border-blue-200 bg-blue-50/20">
+                <CardContent className="pt-3 pb-3">
+                  <p className="text-xs font-semibold text-blue-800 mb-2">📅 Este mês vs mês passado</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">Avaliações:</span>
+                      <span className="font-bold text-sm">{periodComparison.thisMonth}</span>
+                      {periodComparison.countDiff !== 0 && (
+                        <span className={`text-xs font-bold ${periodComparison.countDiff > 0 ? "text-green-600" : "text-red-500"}`}>
+                          {periodComparison.countDiff > 0 ? "▲" : "▼"}{Math.abs(periodComparison.countDiff)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">Nota média:</span>
+                      <span className="font-bold text-sm">{periodComparison.avgThis?.toFixed(1) || "—"}</span>
+                      {periodComparison.ratingDiff !== null && (
+                        <span className={`text-xs font-bold ${periodComparison.ratingDiff > 0 ? "text-green-600" : "text-red-500"}`}>
+                          {periodComparison.ratingDiff > 0 ? "▲" : "▼"}{Math.abs(periodComparison.ratingDiff).toFixed(1)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {unansweredCount > 0 && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-center justify-between">

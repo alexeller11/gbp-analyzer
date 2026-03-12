@@ -16,6 +16,9 @@ import AISearchOptimizer from "@/pages/AISearchOptimizer";
 import ReportGenerator from "@/pages/ReportGenerator";
 import ProfileChecklist from "@/pages/ProfileChecklist";
 import GeoGrid from "@/pages/GeoGrid";
+import ScoreHistoryPage from "@/pages/ScoreHistoryPage";
+import AlertSettings from "@/pages/AlertSettings";
+import PublicReportPage from "@/pages/PublicReportPage";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -40,6 +43,9 @@ function Router() {
       <Route path="/profile/:profileId/report" component={ReportGenerator} />
       <Route path="/profile/:profileId/checklist" component={ProfileChecklist} />
       <Route path="/profile/:profileId/geo-grid" component={GeoGrid} />
+      <Route path="/profile/:profileId/score-history" component={ScoreHistoryPage} />
+      <Route path="/alerts" component={AlertSettings} />
+      <Route path="/public/report/:token" component={PublicReportPage} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

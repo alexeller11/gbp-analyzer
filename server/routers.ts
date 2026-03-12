@@ -1051,10 +1051,26 @@ Responda APENAS com JSON válido:
         const key = process.env.GOOGLE_PLACES_API_KEY;
         if (!key) throw new Error("GOOGLE_PLACES_API_KEY não configurada");
 
+        // Busca coordenadas frescas da Places API para garantir precisão
+        let centerLat = profile.latitude;
+        let centerLng = profile.longitude;
+        if (profile.googleLocationId && !profile.googleLocationId.startsWith("manual_")) {
+          try {
+            const detUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${profile.googleLocationId}&fields=geometry&key=${key}`;
+            const detRes = await fetch(detUrl);
+            const detData = await detRes.json();
+            if (detData.status === "OK" && detData.result?.geometry?.location) {
+              centerLat = detData.result.geometry.location.lat;
+              centerLng = detData.result.geometry.location.lng;
+              // Salva no banco para futuras consultas
+              await db.updateProfile(input.profileId, { latitude: centerLat, longitude: centerLng });
+            }
+          } catch { /* fallback para coordenadas do banco */ }
+        }
+        if (!centerLat || !centerLng) throw new Error("Perfil sem coordenadas. Faça Sync Places primeiro.");
+
         const GRID = 5;
         const STEP_KM = 0.8;
-        const centerLat = profile.latitude;
-        const centerLng = profile.longitude;
         const latStep = STEP_KM / 111;
         const lngStep = STEP_KM / (111 * Math.cos((centerLat * Math.PI) / 180));
         const offset = Math.floor(GRID / 2);

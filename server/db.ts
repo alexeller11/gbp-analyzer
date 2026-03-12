@@ -5,9 +5,11 @@ import {
   InsertUser,
   users, profiles, reviews, metrics, scores, keywords,
   competitors, suggestions, chatMessages, googleAccounts,
+  scoreHistory, geoGridHistory, publicReports, alertSettings,
   type Profile, type Review, type Score, type Suggestion,
   type ChatMessage, type GoogleAccount, type Keyword,
-  type Competitor, type Metric
+  type Competitor, type Metric, type ScoreHistory, type GeoGridHistory,
+  type PublicReport, type AlertSetting
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -319,3 +321,74 @@ export async function deleteSuggestionsByProfileId(profileId: number): Promise<v
 }
 
 // rebuild Wed Mar 11 13:25:27 UTC 2026
+
+// ── Score History ──────────────────────────────────────────────
+export async function saveScoreSnapshot(data: typeof scoreHistory.$inferInsert): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(scoreHistory).values(data);
+}
+
+export async function getScoreHistory(profileId: number, limit = 12): Promise<ScoreHistory[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(scoreHistory)
+    .where(eq(scoreHistory.profileId, profileId))
+    .orderBy(desc(scoreHistory.snapshotAt))
+    .limit(limit);
+}
+
+// ── Geo-Grid History ───────────────────────────────────────────
+export async function saveGeoGridScan(data: typeof geoGridHistory.$inferInsert): Promise<GeoGridHistory> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const result = await db.insert(geoGridHistory).values(data).returning();
+  return result[0];
+}
+
+export async function getGeoGridHistory(profileId: number, keyword?: string, limit = 10): Promise<GeoGridHistory[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const q = db.select().from(geoGridHistory).where(
+    keyword
+      ? and(eq(geoGridHistory.profileId, profileId), eq(geoGridHistory.keyword, keyword))
+      : eq(geoGridHistory.profileId, profileId)
+  ).orderBy(desc(geoGridHistory.scannedAt)).limit(limit);
+  return q;
+}
+
+// ── Public Reports ─────────────────────────────────────────────
+export async function savePublicReport(data: typeof publicReports.$inferInsert): Promise<PublicReport> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  // Remove old reports for same profile
+  await db.delete(publicReports).where(eq(publicReports.profileId, data.profileId as number));
+  const result = await db.insert(publicReports).values(data).returning();
+  return result[0];
+}
+
+export async function getPublicReportByToken(token: string): Promise<PublicReport | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(publicReports).where(eq(publicReports.token, token)).limit(1);
+  return result[0];
+}
+
+// ── Alert Settings ─────────────────────────────────────────────
+export async function getAlertSettings(userId: number): Promise<AlertSetting | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(alertSettings).where(eq(alertSettings.userId, userId)).limit(1);
+  return result[0];
+}
+
+export async function upsertAlertSettings(userId: number, data: Partial<typeof alertSettings.$inferInsert>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await getAlertSettings(userId);
+  if (existing) {
+    await db.update(alertSettings).set({ ...data, updatedAt: new Date() }).where(eq(alertSettings.userId, userId));
+  } else {
+    await db.insert(alertSettings).values({ userId, ...data });
+  }
+}

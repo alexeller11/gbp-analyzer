@@ -70,6 +70,107 @@ export default function PostGenerator({ params }: Props) {
     setGenerating(false);
   };
 
+
+  const downloadPostImage = (post: { type: string; content: string; hashtags: string }, prof: any) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1080; canvas.height = 1080;
+    const ctx = canvas.getContext("2d")!;
+    
+    // Background gradient
+    const grad = ctx.createLinearGradient(0, 0, 1080, 1080);
+    const colors: Record<string, [string, string]> = {
+      institucional: ["#1e3a8a", "#3b82f6"],
+      servico: ["#065f46", "#10b981"],
+      autoridade: ["#7c2d12", "#f97316"],
+      localizacao: ["#1e1b4b", "#6366f1"],
+      oferta: ["#831843", "#ec4899"],
+      depoimento: ["#713f12", "#eab308"],
+      dica: ["#0f3460", "#0ea5e9"],
+      evento: ["#4a044e", "#a855f7"],
+    };
+    const [c1, c2] = colors[post.type] || ["#1e3a8a", "#3b82f6"];
+    grad.addColorStop(0, c1);
+    grad.addColorStop(1, c2);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 1080, 1080);
+
+    // Overlay pattern
+    ctx.fillStyle = "rgba(255,255,255,0.04)";
+    for (let x = 0; x < 1080; x += 60) {
+      ctx.fillRect(x, 0, 1, 1080);
+      ctx.fillRect(0, x, 1080, 1);
+    }
+
+    // Logo bar
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.fillRect(0, 0, 1080, 80);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = "bold 28px system-ui";
+    ctx.fillText(prof?.name || "Seu negócio", 40, 52);
+    
+    // Category badge
+    if (prof?.category) {
+      const badgeW = ctx.measureText(prof.category).width + 24;
+      ctx.fillStyle = "rgba(255,255,255,0.2)";
+      ctx.beginPath();
+      (ctx as any).roundRect?.(1080 - badgeW - 40, 20, badgeW, 40, 20) || ctx.rect(1080 - badgeW - 40, 20, badgeW, 40);
+      ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.font = "16px system-ui";
+      ctx.fillText(prof.category, 1080 - badgeW - 28, 46);
+    }
+
+    // Main text
+    ctx.fillStyle = "white";
+    const lines = wrapText(ctx, post.content, 1000, "28px system-ui");
+    ctx.font = "28px system-ui";
+    let y = 180;
+    for (const line of lines.slice(0, 14)) {
+      ctx.fillText(line, 40, y);
+      y += 44;
+    }
+
+    // Hashtags
+    if (post.hashtags) {
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.font = "22px system-ui";
+      ctx.fillText(post.hashtags.substring(0, 80), 40, 980);
+    }
+
+    // Star rating
+    if (prof?.avgRating) {
+      ctx.fillStyle = "#fbbf24";
+      ctx.font = "bold 36px system-ui";
+      ctx.fillText("★".repeat(Math.round(prof.avgRating)) + " " + prof.avgRating.toFixed(1), 40, 1040);
+    }
+
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `post-gbp-${Date.now()}.png`;
+      a.click();
+    }, "image/png");
+  };
+
+  const wrapText = (ctx: CanvasRenderingContext2D, text: string, maxW: number, font: string): string[] => {
+    ctx.font = font;
+    const words = text.split(" ");
+    const lines: string[] = [];
+    let current = "";
+    for (const word of words) {
+      const test = current ? current + " " + word : word;
+      if (ctx.measureText(test).width > maxW && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = test;
+      }
+    }
+    if (current) lines.push(current);
+    return lines;
+  };
+
   const handleCopy = (i: number, text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(i);
@@ -206,6 +307,10 @@ export default function PostGenerator({ params }: Props) {
                             onClick={() => handleCopy(i, post.content + "\n\n" + post.hashtags)}>
                             {copied === i ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                             {copied === i ? "Copiado!" : "Copiar"}
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                            onClick={() => downloadPostImage(post, profile)}>
+                            🖼 Imagem
                           </Button>
                         </div>
                       </div>
