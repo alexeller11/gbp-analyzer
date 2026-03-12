@@ -988,47 +988,110 @@ Responda APENAS com JSON:
         const reviews = await db.getReviewsByProfileId(input.profileId);
         const avgRating = profile.avgRating || 0;
         const totalReviews = profile.totalReviews || 0;
-        const hasDescription = !!profile.description;
-        const hasWebsite = !!profile.website;
-        const hasPhone = !!profile.phone;
         const respondedReviews = reviews.filter(r => r.reply).length;
         const responseRate = reviews.length > 0 ? Math.round((respondedReviews / reviews.length) * 100) : 0;
 
-        const prompt = `Analise este perfil Google Business para visibilidade em IAs (ChatGPT, Gemini, Perplexity, Google AI Overview).
+        const prompt = `Analise este perfil Google Business para visibilidade em plataformas de IA em 2025.
 
-DADOS DO PERFIL:
+PERFIL:
 - Nome: ${profile.name}
 - Categoria: ${profile.category}
 - Endereço: ${profile.address}
-- Nota: ${avgRating} (${totalReviews} avaliações)
-- Tem descrição: ${hasDescription}
-- Tem site: ${hasWebsite}
-- Tem telefone: ${hasPhone}
+- Nota: ${avgRating}⭐ (${totalReviews} avaliações)
+- Descrição: ${profile.description ? `"${profile.description.substring(0, 200)}"` : "NÃO TEM"}
+- Website: ${profile.website || "não tem"}
+- Telefone: ${profile.phone || "não tem"}
+- Verificado: ${profile.isVerified ? "sim" : "não"}
 - Taxa de resposta a avaliações: ${responseRate}%
+- Fotos: ${profile.photoCount || 0}
+
+Considere como cada IA usa dados locais:
+- Google AI Overview: usa dados do GBP, reviews, Knowledge Graph
+- ChatGPT/Bing: usa web, Bing Maps, sites, reviews públicos
+- Gemini: usa Google Knowledge Graph, GBP, Maps
+- Perplexity: usa web crawling, fontes de reviews
+- Grok: usa X/Twitter, web, dados públicos
 
 Responda APENAS com JSON válido:
 {
-  "score": número de 0-100,
-  "googleAI": número de 0-100,
-  "chatGPT": número de 0-100,
-  "perplexity": número de 0-100,
+  "score": número 0-100 (média geral),
+  "googleAI": número 0-100,
+  "chatGPT": número 0-100,
+  "gemini": número 0-100,
+  "perplexity": número 0-100,
+  "grok": número 0-100,
   "factors": [
-    {"factor": "nome do fator", "status": "ok|warn|fail", "description": "explicação curta"},
-    ...mínimo 8 fatores
+    {"factor": "nome do fator", "status": "ok|warn|fail", "description": "explicação concreta do impacto"},
+    ... mínimo 10 fatores cobrindo: nota, volume de reviews, descrição, website, fotos, respostas, categoria, verificação, consistência de nome/endereço, schema markup
   ],
+  "likelyQueries": ["pergunta 1 que alguém faria para encontrar este negócio", "pergunta 2", "pergunta 3", "pergunta 4"],
   "actions": [
-    {"action": "ação concreta", "impact": "impacto esperado"},
-    ...mínimo 5 ações
+    {"action": "ação concreta", "impact": "impacto esperado mensurável", "platform": "plataforma mais beneficiada"},
+    ... mínimo 6 ações priorizadas por impacto
   ]
 }`;
 
         const raw = await callGroqAPI([
-          { role: "system", content: "Você é especialista em SEO para AI Search (LLMs). Responda APENAS com JSON válido." },
+          { role: "system", content: "Você é especialista em GEO (Generative Engine Optimization) e SEO para AI Search. Responda APENAS com JSON válido, sem markdown." },
           { role: "user", content: prompt },
         ]);
-
         const clean = raw.replace(/```json\n?|```/g, "").trim();
         return JSON.parse(clean);
+      }),
+  }),
+
+  geoGrid: router({
+    scan: protectedProcedure
+      .input(z.object({ profileId: z.number(), keyword: z.string() }))
+      .mutation(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        if (!profile.latitude || !profile.longitude) throw new Error("Perfil sem coordenadas. Faça Sync Places primeiro.");
+
+        const key = process.env.GOOGLE_PLACES_API_KEY;
+        if (!key) throw new Error("GOOGLE_PLACES_API_KEY não configurada");
+
+        const GRID = 5;
+        const STEP_KM = 0.8;
+        const centerLat = profile.latitude;
+        const centerLng = profile.longitude;
+        const latStep = STEP_KM / 111;
+        const lngStep = STEP_KM / (111 * Math.cos((centerLat * Math.PI) / 180));
+        const offset = Math.floor(GRID / 2);
+
+        const points: { lat: number; lng: number; rank: number | null }[] = [];
+
+        for (let row = 0; row < GRID; row++) {
+          for (let col = 0; col < GRID; col++) {
+            const lat = centerLat + (offset - row) * latStep;
+            const lng = centerLng + (col - offset) * lngStep;
+
+            try {
+              // Busca os top 20 resultados nesse ponto para a keyword
+              const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(input.keyword)}&location=${lat},${lng}&radius=2000&key=${key}&language=pt-BR`;
+              const res = await fetch(url);
+              const data = await res.json();
+              const results: any[] = data.results || [];
+
+              // Procura o perfil nos resultados (por nome ou placeId)
+              const profileName = profile.name.toLowerCase();
+              const idx = results.findIndex(r =>
+                r.name?.toLowerCase().includes(profileName.split(" ")[0].toLowerCase()) ||
+                r.place_id === (profile as any).placeId ||
+                (profile.googleLocationId && r.place_id === profile.googleLocationId.split("/").pop())
+              );
+
+              points.push({ lat, lng, rank: idx >= 0 ? idx + 1 : null });
+            } catch {
+              points.push({ lat, lng, rank: null });
+            }
+
+            // Delay para evitar rate limit (25 chamadas por scan)
+            await new Promise(r => setTimeout(r, 150));
+          }
+        }
+
+        return { points, keyword: input.keyword, center: { lat: centerLat, lng: centerLng } };
       }),
   }),
 
