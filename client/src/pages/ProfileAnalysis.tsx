@@ -219,6 +219,7 @@ export default function ProfileAnalysis({ params }: Props) {
     { label: "🧠 AI Search", route: "ai-search" },
     { label: "📄 Relatório", route: "report" },
     { label: "✅ Checklist", route: "checklist" },
+    { label: "📍 Geo-Grid", route: "geo-grid" },
   ];
 
   return (
