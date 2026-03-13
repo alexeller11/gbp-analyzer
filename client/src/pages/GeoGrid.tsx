@@ -8,138 +8,283 @@ import {
   TrendingUp, TrendingDown, History,
 } from "lucide-react";
 import { useLocation } from "wouter";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 interface Props { params: { profileId: string } }
 interface GridPoint { lat: number; lng: number; rank: number | null }
 
-function rankColor(r: number | null) {
-  if (r === null) return { bg: "#6b7280", text: "#fff", border: "#4b5563" };
-  if (r === 1)    return { bg: "#15803d", text: "#fff", border: "#166534" };
-  if (r <= 3)     return { bg: "#22c55e", text: "#fff", border: "#16a34a" };
-  if (r <= 7)     return { bg: "#eab308", text: "#fff", border: "#ca8a04" };
-  if (r <= 10)    return { bg: "#f97316", text: "#fff", border: "#ea580c" };
-  return { bg: "#ef4444", text: "#fff", border: "#dc2626" };
+/* ─── helpers de projeção Mercator ─────────────────────────── */
+function project(lat: number, lng: number) {
+  const x = (lng + 180) / 360;
+  const sinLat = Math.sin((lat * Math.PI) / 180);
+  const y = 0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI);
+  return { x, y };            // coordenadas 0‑1 no mundo inteiro
 }
 
-function RankGrid({ points }: { points: GridPoint[] }) {
-  const rows = 5, cols = 5;
-  const centerIdx = Math.floor(points.length / 2); // índice 12 na grade 5x5
+function worldToPixel(
+  lat: number, lng: number,
+  centerLat: number, centerLng: number,
+  zoom: number, w: number, h: number
+) {
+  const scale = Math.pow(2, zoom) * 256;
+  const c  = project(centerLat, centerLng);
+  const p  = project(lat, lng);
+  return {
+    x: w / 2 + (p.x - c.x) * scale,
+    y: h / 2 + (p.y - c.y) * scale,
+  };
+}
+
+function bestZoom(points: GridPoint[], size: number) {
+  if (!points.length) return 14;
+  const lats = points.map(p => p.lat);
+  const lngs = points.map(p => p.lng);
+  const spanLat = Math.max(...lats) - Math.min(...lats);
+  const spanLng = Math.max(...lngs) - Math.min(...lngs);
+  const span = Math.max(spanLat, spanLng);
+  for (let z = 16; z >= 10; z--) {
+    const pixels = span * Math.pow(2, z) * 256 / 360;
+    if (pixels < size * 0.65) return z;
+  }
+  return 12;
+}
+
+/* ─── cores ─────────────────────────────────────────────────── */
+function rankStyle(r: number | null): { bg: string; ring: string; text: string } {
+  if (r === null) return { bg: "#6b7280", ring: "#4b5563", text: "#fff" };
+  if (r === 1)    return { bg: "#15803d", ring: "#166534", text: "#fff" };
+  if (r <= 3)     return { bg: "#22c55e", ring: "#16a34a", text: "#fff" };
+  if (r <= 7)     return { bg: "#d4a017", ring: "#a37c0e", text: "#fff" };
+  if (r <= 10)    return { bg: "#f97316", ring: "#ea580c", text: "#fff" };
+  return           { bg: "#ef4444", ring: "#dc2626", text: "#fff" };
+}
+
+/* ─── componente do mapa ─────────────────────────────────────── */
+function GeoMap({
+  points, centerLat, centerLng,
+}: { points: GridPoint[]; centerLat: number; centerLng: number }) {
+  const wrapRef  = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState(0);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.getBoundingClientRect().width;
+      if (w > 10) setSize(Math.round(w));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  /* placeholder enquanto ainda não tem tamanho */
+  if (size === 0) {
+    return (
+      <div ref={wrapRef} style={{ width: "100%", aspectRatio: "1/1" }}
+           className="rounded-xl bg-gray-100 animate-pulse" />
+    );
+  }
+
+  const zoom     = bestZoom(points, size);
+  const TILE     = 256;
+  const scale    = Math.pow(2, zoom);
+  const c        = project(centerLng > 0 || centerLng <= 0 ? centerLng : 0, centerLat); // unused, kept for clarity
+  const cProj    = project(centerLat, centerLng);
+
+  /* tiles necessários */
+  const tilesX   = Math.ceil(size / TILE) + 3;
+  const tilesY   = Math.ceil(size / TILE) + 3;
+  const originTX = cProj.x * scale;   // tile‑x fracionário do centro
+  const originTY = cProj.y * scale;
+  const startTX  = Math.floor(originTX) - Math.floor(tilesX / 2);
+  const startTY  = Math.floor(originTY) - Math.floor(tilesY / 2);
+
+  // deslocamento em pixels do canto top-left do tile (startTX, startTY)
+  const offX = size / 2 - (originTX - startTX) * TILE;
+  const offY = size / 2 - (originTY - startTY) * TILE;
+
+  const maxTile = scale;
+  const tiles: { tx: number; ty: number; px: number; py: number }[] = [];
+  for (let row = 0; row < tilesY; row++) {
+    for (let col = 0; col < tilesX; col++) {
+      const tx = startTX + col;
+      const ty = startTY + row;
+      if (tx < 0 || ty < 0 || tx >= maxTile || ty >= maxTile) continue;
+      tiles.push({ tx, ty, px: offX + col * TILE, py: offY + row * TILE });
+    }
+  }
+
+  /* pins */
+  const PIN_R = Math.min(size / 5 / 2, 26);   // raio do círculo
+  const centerIdx = Math.floor(points.length / 2);
+
+  const TILE_SERVERS = [
+    "https://a.tile.openstreetmap.org",
+    "https://b.tile.openstreetmap.org",
+    "https://c.tile.openstreetmap.org",
+  ];
 
   return (
-    <div className="w-full">
-      <div
+    /* wrapper mantém proporção 1:1 e fornece posição relativa */
+    <div
+      ref={wrapRef}
+      style={{ width: "100%", aspectRatio: "1/1", position: "relative",
+               overflow: "hidden", borderRadius: 12, background: "#e8e0d8" }}
+    >
+      {/* ── tiles OSM ── */}
+      {tiles.map((t) => {
+        const server = TILE_SERVERS[(t.tx + t.ty) % 3];
+        return (
+          <img
+            key={`${t.tx}-${t.ty}`}
+            src={`${server}/${zoom}/${t.tx}/${t.ty}.png`}
+            alt=""
+            style={{
+              position: "absolute",
+              left:  t.px,
+              top:   t.py,
+              width: TILE,
+              height: TILE,
+              userSelect: "none",
+              pointerEvents: "none",
+            }}
+            onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+          />
+        );
+      })}
+
+      {/* ── pins SVG ── */}
+      <svg
         style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${cols}, 1fr)`,
-          gap: 6,
-          padding: 6,
-          background: "linear-gradient(135deg, #e0f2fe 0%, #dbeafe 50%, #ede9fe 100%)",
-          borderRadius: 16,
+          position: "absolute", inset: 0,
+          width: size, height: size,
+          overflow: "visible", pointerEvents: "none",
         }}
       >
         {points.map((pt, i) => {
-          const isCenter = i === centerIdx;
-          const { bg, text, border } = rankColor(pt.rank);
-          const label = pt.rank === null ? "20+" : pt.rank === 1 ? "🥇" : `#${pt.rank}`;
+          const { x, y }   = worldToPixel(pt.lat, pt.lng, centerLat, centerLng, zoom, size, size);
+          const isCenter   = i === centerIdx;
+          const label      = pt.rank === null ? "20+" : String(pt.rank);
+          const { bg, ring, text } = rankStyle(pt.rank);
+          const r          = isCenter ? PIN_R + 4 : PIN_R;
+          const fontSize   = label.length > 2 ? r * 0.65 : r * 0.85;
 
           return (
-            <div
-              key={i}
-              title={`Lat ${pt.lat.toFixed(4)}, Lng ${pt.lng.toFixed(4)} → posição ${pt.rank ?? ">20"}`}
-              style={{
-                aspectRatio: "1/1",
-                background: bg,
-                border: `3px solid ${isCenter ? "#1d4ed8" : border}`,
-                borderRadius: isCenter ? 12 : 10,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexDirection: "column",
-                boxShadow: isCenter
-                  ? "0 0 0 3px rgba(29,78,216,0.35), 0 4px 12px rgba(0,0,0,0.2)"
-                  : "0 2px 6px rgba(0,0,0,0.15)",
-                transform: isCenter ? "scale(1.08)" : "scale(1)",
-                zIndex: isCenter ? 2 : 1,
-                position: "relative",
-                transition: "transform 0.15s",
-                cursor: "default",
-              }}
-            >
-              <span style={{
-                color: text,
-                fontWeight: 900,
-                fontSize: label.length > 3 ? "clamp(11px, 2.5vw, 15px)" : "clamp(13px, 3vw, 20px)",
-                lineHeight: 1,
-                textShadow: "0 1px 3px rgba(0,0,0,0.4)",
-                userSelect: "none",
-              }}>
-                {isCenter ? "📍" : label}
-              </span>
+            <g key={i}>
+              {/* sombra suave */}
+              <circle cx={x} cy={y + 2} r={r + 1} fill="rgba(0,0,0,0.20)" />
+
+              {/* disco colorido */}
+              <circle
+                cx={x} cy={y} r={r}
+                fill={bg}
+                stroke={isCenter ? "#1e40af" : ring}
+                strokeWidth={isCenter ? 3.5 : 2}
+              />
+
+              {/* anel pontilhado no centro */}
               {isCenter && (
-                <span style={{ fontSize: 8, color: "rgba(255,255,255,0.9)", marginTop: 2, fontWeight: 700 }}>
-                  VOCÊ
-                </span>
+                <circle cx={x} cy={y} r={r + 7}
+                  fill="none" stroke="#1e40af"
+                  strokeWidth={2.5} strokeDasharray="5 3" />
               )}
-            </div>
+
+              {/* rótulo */}
+              {isCenter ? (
+                <text x={x} y={y} textAnchor="middle" dominantBaseline="central"
+                  fontSize={r * 1.0} style={{ userSelect: "none" }}>
+                  📍
+                </text>
+              ) : (
+                <text x={x} y={y} textAnchor="middle" dominantBaseline="central"
+                  fill={text} fontWeight="800" fontSize={fontSize}
+                  style={{ fontFamily: "system-ui, sans-serif", userSelect: "none" }}>
+                  {label}
+                </text>
+              )}
+            </g>
           );
         })}
+      </svg>
+
+      {/* crédito */}
+      <div style={{
+        position: "absolute", bottom: 4, right: 6,
+        fontSize: 9, color: "#444",
+        background: "rgba(255,255,255,0.75)",
+        padding: "1px 5px", borderRadius: 3,
+        pointerEvents: "none",
+      }}>
+        © OpenStreetMap
       </div>
     </div>
   );
 }
 
+/* ─── legendas ──────────────────────────────────────────────── */
 const LEGEND = [
   { color: "#15803d", label: "#1" },
   { color: "#22c55e", label: "#2–3" },
-  { color: "#eab308", label: "#4–7" },
+  { color: "#d4a017", label: "#4–7" },
   { color: "#f97316", label: "#8–10" },
   { color: "#ef4444", label: "#11–20" },
   { color: "#6b7280", label: ">20" },
 ];
 
-export default function GeoGrid({ params }: Props) {
+/* ─── página principal ──────────────────────────────────────── */
+export default function GeoGrid({ params }: { params: { profileId: string } }) {
   const [, setLocation] = useLocation();
   const profileId = parseInt(params.profileId);
-  const [keyword, setKeyword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [points, setPoints] = useState<GridPoint[]>([]);
-  const [lastKeyword, setLastKeyword] = useState("");
-  const [avgRank, setAvgRank] = useState<number | null>(null);
-  const [top3Pct, setTop3Pct] = useState<number | null>(null);
+
+  const [keyword,     setKeyword]     = useState("");
+  const [loading,     setLoading]     = useState(false);
+  const [points,      setPoints]      = useState<GridPoint[]>([]);
+  const [center,      setCenter]      = useState<{ lat: number; lng: number } | null>(null);
+  const [lastKw,      setLastKw]      = useState("");
+  const [avgRank,     setAvgRank]     = useState<number | null>(null);
+  const [top3Pct,     setTop3Pct]     = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
-  const { data: profile } = trpc.profiles.getById.useQuery({ id: profileId });
-  const { data: history, refetch: refetchHistory } = trpc.geoGridHistory.getByProfile.useQuery({ profileId });
-  const scanMutation = trpc.geoGrid.scan.useMutation();
+  const { data: profile }                        = trpc.profiles.getById.useQuery({ id: profileId });
+  const { data: history, refetch: refetchHist }  = trpc.geoGridHistory.getByProfile.useQuery({ profileId });
+  const scanMutation                             = trpc.geoGrid.scan.useMutation();
 
-  const handleScan = async () => {
+  async function handleScan() {
     if (!keyword.trim()) { toast.error("Digite uma palavra-chave"); return; }
     setLoading(true);
     try {
       const res = await scanMutation.mutateAsync({ profileId, keyword: keyword.trim() });
       setPoints(res.points);
-      setLastKeyword(keyword.trim());
+      setCenter(res.center);
+      setLastKw(keyword.trim());
       setAvgRank(typeof res.avgRank === "number" ? res.avgRank : null);
       setTop3Pct(typeof res.top3Pct === "number" ? res.top3Pct : null);
-      refetchHistory();
+      refetchHist();
       toast.success(`Escaneado! Posição média: #${res.avgRank ? Math.round(res.avgRank) : "20+"}`);
     } catch (e: any) {
       toast.error(e.message || "Erro ao escanear");
     }
     setLoading(false);
-  };
+  }
 
-  const loadHistoric = (h: any) => {
-    setPoints(h.points);
-    setLastKeyword(h.keyword);
+  function loadHistoric(h: any) {
+    const pts: GridPoint[] = h.points;
+    setPoints(pts);
+    const lats = pts.map(p => p.lat), lngs = pts.map(p => p.lng);
+    setCenter({
+      lat: lats.reduce((a, b) => a + b, 0) / lats.length,
+      lng: lngs.reduce((a, b) => a + b, 0) / lngs.length,
+    });
+    setLastKw(h.keyword);
     setAvgRank(h.avgRank);
     setTop3Pct(h.top3Pct);
     setShowHistory(false);
-  };
+  }
 
-  const avgColor = rankColor(avgRank !== null ? Math.round(avgRank) : null).bg;
+  const avgColor = rankStyle(avgRank !== null ? Math.round(avgRank) : null).bg;
 
   return (
     <DashboardLayout>
@@ -172,8 +317,8 @@ export default function GeoGrid({ params }: Props) {
             <div className="flex gap-2 items-start">
               <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-blue-800">
-                Mostra sua posição no Google Maps em <strong>25 pontos geográficos</strong> ao redor
-                do seu negócio. Verde = topo, vermelho = longe do topo.
+                Posição no Google Maps em <strong>25 pontos</strong> ao redor do seu negócio.
+                Verde = topo, vermelho = longe.
               </p>
             </div>
           </CardContent>
@@ -197,18 +342,22 @@ export default function GeoGrid({ params }: Props) {
                       <p className="font-medium text-sm truncate">"{h.keyword}"</p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(h.scannedAt).toLocaleDateString("pt-BR", {
-                          day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                          day: "2-digit", month: "short",
+                          hour: "2-digit", minute: "2-digit",
                         })}
                       </p>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="font-bold text-sm"
-                        style={{ color: rankColor(h.avgRank ? Math.round(h.avgRank) : null).bg }}>
+                        style={{ color: rankStyle(h.avgRank ? Math.round(h.avgRank) : null).bg }}>
                         #{h.avgRank ? Math.round(h.avgRank) : "20+"}
                       </p>
                       {diff !== null && (
-                        <p className={`text-xs flex items-center gap-0.5 justify-end ${diff > 0 ? "text-green-600" : "text-red-500"}`}>
-                          {diff > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                        <p className={`text-xs flex items-center gap-0.5 justify-end
+                          ${diff > 0 ? "text-green-600" : "text-red-500"}`}>
+                          {diff > 0
+                            ? <TrendingUp className="w-3 h-3" />
+                            : <TrendingDown className="w-3 h-3" />}
                           {diff > 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1)}
                         </p>
                       )}
@@ -220,20 +369,18 @@ export default function GeoGrid({ params }: Props) {
           </Card>
         )}
 
-        {/* Campo de busca */}
+        {/* Busca */}
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex gap-2">
               <Input
-                placeholder={`Ex: "${profile?.category?.toLowerCase() || "clínica odontológica"}"`}
+                placeholder={`Ex: "${profile?.category?.toLowerCase() || "materiais de construção"}"`}
                 value={keyword}
                 onChange={e => setKeyword(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleScan()}
               />
               <Button onClick={handleScan} disabled={loading || !keyword.trim()} className="gap-2 flex-shrink-0">
-                {loading
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <MapPin className="w-4 h-4" />}
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />}
                 {loading ? "Escaneando..." : "Escanear"}
               </Button>
             </div>
@@ -273,33 +420,39 @@ export default function GeoGrid({ params }: Props) {
           <Card><CardContent className="py-14 text-center">
             <MapPin className="w-10 h-10 text-blue-500 mx-auto mb-3 animate-bounce" />
             <p className="font-semibold">Escaneando 25 pontos no mapa...</p>
-            <p className="text-sm text-muted-foreground mt-1">Consultando Google Maps em cada ponto (~30s)</p>
+            <p className="text-sm text-muted-foreground mt-1">~30 segundos</p>
             <div className="max-w-xs mx-auto mt-4 h-1.5 bg-gray-100 rounded-full overflow-hidden">
               <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: "60%" }} />
             </div>
           </CardContent></Card>
         )}
 
-        {/* Grade de ranking */}
-        {points.length > 0 && !loading && (
+        {/* MAPA */}
+        {points.length > 0 && !loading && center && (
           <Card>
             <CardHeader className="pb-2 pt-4">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">"{lastKeyword}"</CardTitle>
+                <CardTitle className="text-sm">"{lastKw}"</CardTitle>
                 <Button variant="ghost" size="sm" className="gap-1 text-xs h-7"
-                  onClick={() => { setPoints([]); setAvgRank(null); setTop3Pct(null); }}>
+                  onClick={() => { setPoints([]); setAvgRank(null); setTop3Pct(null); setCenter(null); }}>
                   <RefreshCw className="w-3 h-3" /> Novo scan
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="pb-4">
-              <RankGrid points={points} />
+
+              {/* ← mapa real aqui */}
+              <GeoMap
+                points={points}
+                centerLat={center.lat}
+                centerLng={center.lng}
+              />
 
               {/* Legenda */}
               <div className="flex flex-wrap gap-x-4 gap-y-2 justify-center mt-4">
                 {LEGEND.map(l => (
                   <div key={l.label} className="flex items-center gap-1.5 text-xs">
-                    <div className="w-4 h-4 rounded-md shadow-sm flex-shrink-0"
+                    <div className="w-4 h-4 rounded-full shadow-sm flex-shrink-0"
                       style={{ background: l.color }} />
                     <span className="text-muted-foreground">{l.label}</span>
                   </div>
@@ -311,7 +464,7 @@ export default function GeoGrid({ params }: Props) {
                 {avgRank !== null && (
                   avgRank <= 3 ? " · 🟢 Excelente visibilidade!" :
                   avgRank <= 7 ? " · 🟡 Visibilidade moderada" :
-                  " · 🔴 Baixa visibilidade — otimize seu perfil"
+                  " · 🔴 Baixa visibilidade — otimize o perfil"
                 )}
               </div>
             </CardContent>
@@ -327,7 +480,7 @@ export default function GeoGrid({ params }: Props) {
             </div>
             <p className="font-semibold">Digite uma palavra-chave para escanear</p>
             <p className="text-sm text-muted-foreground mt-1">
-              A grade mostrará sua posição em 25 pontos ao redor do negócio
+              O mapa mostrará sua posição em 25 pontos ao redor do negócio
             </p>
           </CardContent></Card>
         )}
