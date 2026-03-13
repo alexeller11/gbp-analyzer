@@ -94,7 +94,7 @@ export async function getBusinessLocations(accessToken: string, accountId: strin
 
 /** Busca detalhes de uma localização */
 export async function getLocationDetails(accessToken: string, locationName: string): Promise<any> {
-  const readMask = "name,title,storefrontAddress,websiteUri,phoneNumbers,categories,metadata,regularHours,latlng";
+  const readMask = "name,title,storefrontAddress,websiteUri,phoneNumbers,categories,metadata,regularHours,latlng,profile";
   const response = await fetch(
     `https://mybusinessbusinessinformation.googleapis.com/v1/${locationName}?readMask=${readMask}`,
     { headers: { Authorization: `Bearer ${accessToken}` } }

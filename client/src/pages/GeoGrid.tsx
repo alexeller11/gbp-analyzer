@@ -43,9 +43,10 @@ function bestZoom(points: GridPoint[], size: number) {
   const spanLat = Math.max(...lats) - Math.min(...lats);
   const spanLng = Math.max(...lngs) - Math.min(...lngs);
   const span = Math.max(spanLat, spanLng);
-  for (let z = 16; z >= 10; z--) {
+  // Usa 50% do mapa para a grade (deixa margem para ver a cidade)
+  for (let z = 15; z >= 10; z--) {
     const pixels = span * Math.pow(2, z) * 256 / 360;
-    if (pixels < size * 0.65) return z;
+    if (pixels < size * 0.50) return z;
   }
   return 12;
 }
@@ -118,7 +119,7 @@ function GeoMap({
   }
 
   /* pins */
-  const PIN_R = Math.min(size / 5 / 2, 26);   // raio do círculo
+  const PIN_R = Math.min(size / 5 / 3.5, 18);   // raio do círculo — menor para ver o mapa
   const centerIdx = Math.floor(points.length / 2);
 
   const TILE_SERVERS = [

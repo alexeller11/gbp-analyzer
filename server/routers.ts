@@ -508,6 +508,31 @@ Responda com JSON válido:
 
         const results: any = { reviews: 0, metrics: false, score: false };
 
+        // 0. Buscar detalhes completos do perfil GBP (inclui descrição)
+        try {
+          const { getLocationDetails } = await import("./google-mybusiness-api");
+          const details = await getLocationDetails(accessToken, profile.googleLocationId);
+          if (details) {
+            const updates: Record<string, any> = {};
+            // description vem em profile.description no GBP API
+            const desc = details.profile?.description;
+            if (desc && desc.length > 5) updates.description = desc;
+            // phone
+            const phone = details.phoneNumbers?.primaryPhone;
+            if (phone) updates.phone = phone;
+            // website
+            if (details.websiteUri) updates.website = details.websiteUri;
+            // latlng
+            if (details.latlng?.latitude) updates.latitude = details.latlng.latitude;
+            if (details.latlng?.longitude) updates.longitude = details.latlng.longitude;
+            if (Object.keys(updates).length > 0) {
+              await db.updateProfile(input.profileId, updates);
+            }
+          }
+        } catch (e) {
+          console.error("[Sync] Details error:", e);
+        }
+
         // 1. Sincronizar reviews
         try {
           const { getLocationReviews } = await import("./google-mybusiness-api");
@@ -546,12 +571,16 @@ Responda com JSON válido:
           results.reviewsError = (e as Error).message;
         }
 
-        // 2. Recalcular score com dados atualizados
+        // 2. Recalcular score com dados atualizados + salvar snapshot histórico
         try {
           const updated = await db.getProfileById(input.profileId);
           if (updated) {
             const s = calcScore(updated);
             await db.createScore({ profileId: input.profileId, ...s });
+            // Salva snapshot semanal automaticamente
+            try {
+              await db.saveScoreSnapshot({ profileId: input.profileId, ...s });
+            } catch { /* silencioso */ }
             results.score = true;
           }
         } catch (e) {
@@ -1067,10 +1096,28 @@ Responda APENAS com JSON válido:
             }
           } catch { /* fallback para coordenadas do banco */ }
         }
-        if (!centerLat || !centerLng) throw new Error("Perfil sem coordenadas. Faça Sync Places primeiro.");
+        // Fallback: geocodificar pelo endereço completo se coords inválidas
+        if (!centerLat || !centerLng || (centerLat === 0 && centerLng === 0)) {
+          try {
+            const addr = profile.address || profile.name;
+            const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${key}`;
+            const geoRes = await fetch(geoUrl);
+            const geoData = await geoRes.json();
+            const loc = geoData.results?.[0]?.geometry?.location;
+            if (loc) {
+              centerLat = loc.lat;
+              centerLng = loc.lng;
+              await db.updateProfile(input.profileId, { latitude: centerLat, longitude: centerLng });
+            }
+          } catch { /* ignora */ }
+        }
+
+        if (!centerLat || !centerLng || (centerLat === 0 && centerLng === 0)) {
+          throw new Error("Perfil sem coordenadas. Clique em 🗺️ Maps para sincronizar primeiro.");
+        }
 
         const GRID = 5;
-        const STEP_KM = 0.8;
+        const STEP_KM = 0.5; // 500m entre pontos = área de 2km × 2km
         const latStep = STEP_KM / 111;
         const lngStep = STEP_KM / (111 * Math.cos((centerLat * Math.PI) / 180));
         const offset = Math.floor(GRID / 2);
@@ -1107,7 +1154,21 @@ Responda APENAS com JSON válido:
           }
         }
 
-        return { points, keyword: input.keyword, center: { lat: centerLat, lng: centerLng } };
+        // Salva histórico do scan
+        const found = points.filter((p: any) => p.rank !== null);
+        const avgRank = found.length > 0 ? found.reduce((s: number, p: any) => s + p.rank, 0) / found.length : null;
+        const top3Pct = Math.round((points.filter((p: any) => p.rank !== null && p.rank <= 3).length / points.length) * 100);
+        try {
+          await db.saveGeoGridScan({
+            profileId: input.profileId,
+            keyword: input.keyword,
+            avgRank,
+            top3Pct,
+            pointsJson: JSON.stringify(points),
+          });
+        } catch { /* não bloqueia */ }
+
+        return { points, keyword: input.keyword, center: { lat: centerLat, lng: centerLng }, avgRank, top3Pct };
       }),
   }),
 
@@ -1197,6 +1258,110 @@ Responda APENAS com JSON válido:
         return JSON.parse(clean);
       }),
   }),
+  // ── Score History ──────────────────────────────────────────────
+  scoreHistory: router({
+    getByProfile: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .query(async ({ input }) => db.getScoreHistory(input.profileId, 16)),
+
+    snapshot: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const score = await db.getScoreByProfileId(input.profileId);
+        if (!score) throw new Error("Score não calculado ainda");
+        await db.saveScoreSnapshot({
+          profileId: input.profileId,
+          total: score.total,
+          completeness: score.completeness,
+          reviewScore: score.reviewScore,
+          engagement: score.engagement,
+          consistency: score.consistency,
+          mediaScore: score.mediaScore,
+        });
+        return { ok: true };
+      }),
+  }),
+
+  // ── Geo-Grid History ───────────────────────────────────────────
+  geoGridHistory: router({
+    getByProfile: protectedProcedure
+      .input(z.object({ profileId: z.number(), keyword: z.string().optional() }))
+      .query(async ({ input }) => {
+        const rows = await db.getGeoGridHistory(input.profileId, input.keyword, 10);
+        return rows.map(r => ({ ...r, points: JSON.parse(r.pointsJson) }));
+      }),
+  }),
+
+  // ── Public Reports ─────────────────────────────────────────────
+  publicReport: router({
+    generate: protectedProcedure
+      .input(z.object({ profileId: z.number() }))
+      .mutation(async ({ input }) => {
+        const profile = await db.getProfileById(input.profileId);
+        if (!profile) throw new Error("Perfil não encontrado");
+        const score = await db.getScoreByProfileId(input.profileId);
+        const reviews = await db.getReviewsByProfileId(input.profileId);
+        const competitors = await db.getCompetitorsByProfileId(input.profileId);
+        const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
+        const reportData = {
+          profile: { name: profile.name, category: profile.category, address: profile.address, avgRating: profile.avgRating, totalReviews: profile.totalReviews, isVerified: profile.isVerified },
+          score: score ? { total: Math.round(score.total), completeness: Math.round(score.completeness), reviewScore: Math.round(score.reviewScore) } : null,
+          reviewCount: reviews.length,
+          competitorCount: competitors.length,
+          generatedAt: new Date().toISOString(),
+        };
+        const saved = await db.savePublicReport({
+          profileId: input.profileId,
+          token,
+          reportJson: JSON.stringify(reportData),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        });
+        return { token: saved.token, url: `/public/report/${saved.token}` };
+      }),
+
+    getByToken: publicProcedure
+      .input(z.object({ token: z.string() }))
+      .query(async ({ input }) => {
+        const row = await db.getPublicReportByToken(input.token);
+        if (!row) throw new Error("Relatório não encontrado ou expirado");
+        if (row.expiresAt && new Date() > row.expiresAt) throw new Error("Relatório expirado");
+        return { ...row, data: JSON.parse(row.reportJson) };
+      }),
+  }),
+
+  // ── Alerts ─────────────────────────────────────────────────────
+  alerts: router({
+    getSettings: protectedProcedure
+      .query(async ({ ctx }) => db.getAlertSettings(ctx.user.id)),
+
+    saveSettings: protectedProcedure
+      .input(z.object({
+        webhookUrl: z.string().optional(),
+        emailAlerts: z.boolean().optional(),
+        alertOnNegative: z.boolean().optional(),
+        alertOnNewReview: z.boolean().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        await db.upsertAlertSettings(ctx.user.id, input);
+        return { ok: true };
+      }),
+
+    testWebhook: protectedProcedure
+      .input(z.object({ webhookUrl: z.string() }))
+      .mutation(async ({ input }) => {
+        try {
+          const res = await fetch(input.webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "✅ GBP Analyzer — webhook configurado com sucesso!" }),
+          });
+          return { ok: res.ok, status: res.status };
+        } catch (e: any) {
+          throw new Error("Falha ao enviar webhook: " + e.message);
+        }
+      }),
+  }),
+
 });
 
 export type AppRouter = typeof appRouter;
