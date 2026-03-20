@@ -109,3 +109,21 @@ export async function createProfile(userId: number, data: any) {
     throw error;
   }
 }
+// No topo do db.ts, certifique-se de que tem as importações do Drizzle
+import { desc, eq } from "drizzle-orm";
+import { geoGridScans } from "../drizzle/schema"; // Ajuste o caminho conforme seu projeto
+
+// Adicione esta função:
+export async function getLastGeoGridScan(profileId: number) {
+  const db = await getDb(); // ou como você chama sua instância do banco
+  if (!db) return null;
+
+  const [lastScan] = await db
+    .select()
+    .from(geoGridScans)
+    .where(eq(geoGridScans.profileId, profileId))
+    .orderBy(desc(geoGridScans.createdAt))
+    .limit(1);
+
+  return lastScan || null;
+}
