@@ -1,10 +1,10 @@
 import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./cookies"; // Ficheiro na mesma pasta
-import { systemRouter } from "./systemRouter"; // Ficheiro na mesma pasta
-import { publicProcedure, router, protectedProcedure } from "./trpc"; // Ficheiro na mesma pasta
+import { getSessionCookieOptions } from "./cookies";
+import { systemRouter } from "./systemRouter";
+import { publicProcedure, router, protectedProcedure } from "./trpc";
 import { z } from "zod";
 
-// IMPORTANTE: Adicionado "../" para subir uma pasta e encontrar os ficheiros corretamente na Render
+// Corrigido: caminhos agora apontam para a pasta 'server/'
 import * as db from "../db"; 
 import { callGroqAPI } from "../groq"; 
 import { reviewsRouter, generateResponseProcedure } from "../reviews-router"; 
@@ -77,11 +77,8 @@ async function getValidAccessToken(userId: number): Promise<string | null> {
   return tokenData.accessToken;
 }
 
-/* ─── Router ──────────────────────────────────────────────────────── */
-
 export const appRouter = router({
   system: systemRouter,
-
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -90,96 +87,46 @@ export const appRouter = router({
       return { success: true } as const;
     }),
   }),
-
   reviews: reviewsRouter,
   reviewAI: router({
     generateResponse: generateResponseProcedure,
   }),
-
   profiles: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       return db.getProfilesByUserId(ctx.user.id);
     }),
-
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => db.getProfileById(input.id)),
-
     extractFromUrl: protectedProcedure
       .input(z.object({ url: z.string() }))
       .mutation(async ({ input }) => {
-        if (!process.env.GOOGLE_PLACES_API_KEY) {
-          throw new Error("GOOGLE_PLACES_API_KEY não configurada no servidor");
-        }
-
-        let placeId: string | null = null;
-
-        if (input.url.startsWith("http")) {
-          placeId = await findPlaceFromUrl(input.url);
-        } else {
-          const key = process.env.GOOGLE_PLACES_API_KEY;
-          const params = new URLSearchParams({ query: input.url, key, language: "pt-BR" });
+        if (!process.env.GOOGLE_PLACES_API_KEY) throw new Error("GOOGLE_PLACES_API_KEY não configurada");
+        let placeId = input.url.startsWith("http") ? await findPlaceFromUrl(input.url) : null;
+        if (!placeId) {
+          const params = new URLSearchParams({ query: input.url, key: process.env.GOOGLE_PLACES_API_KEY, language: "pt-BR" });
           const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`);
           const data = await res.json();
           placeId = data.results?.[0]?.place_id || null;
         }
-
-        if (!placeId) throw new Error("Negócio não encontrado. Tente ser mais específico.");
-
+        if (!placeId) throw new Error("Negócio não encontrado.");
         const details = await getPlaceDetails(placeId);
-        if (!details) throw new Error("Negócio encontrado mas não foi possível buscar os detalhes.");
-
-        const categoryMap: Record<string, string> = {
-          restaurant: "Restaurante", gym: "Academia", hospital: "Hospital",
-          dentist: "Clínica Odontológica", pharmacy: "Farmácia", lodging: "Hotel/Pousada",
-          supermarket: "Supermercado", store: "Loja", beauty_salon: "Salão de Beleza",
-          lawyer: "Escritório de Advocacia", accounting: "Contabilidade", school: "Escola",
-          bar: "Bar", cafe: "Cafeteria", bakery: "Padaria", car_repair: "Oficina Mecânica",
-          clothing_store: "Loja de Roupas", electronics_store: "Loja de Eletrônicos",
-          hair_care: "Cabeleireiro", real_estate_agency: "Imobiliária",
-          travel_agency: "Agência de Viagens", veterinary_care: "Clínica Veterinária",
-        };
-
-        const category = categoryMap[details.category] || details.category?.replace(/_/g, " ") || "Negócio";
-        return { ...details, category };
+        if (!details) throw new Error("Erro ao buscar detalhes.");
+        return details;
       }),
-
     create: protectedProcedure
       .input(z.object({
-        googleAccountId: z.string(),
-        googleLocationId: z.string(),
-        name: z.string(),
-        address: z.string(),
-        phone: z.string().optional(),
-        website: z.string().optional(),
-        category: z.string(),
-        description: z.string().optional(),
-        latitude: z.number(),
-        longitude: z.number(),
-        isVerified: z.boolean().optional(),
-        totalReviews: z.number().optional(),
-        avgRating: z.number().optional(),
-        photoCount: z.number().optional(),
-        postCount: z.number().optional(),
+        googleAccountId: z.string(), googleLocationId: z.string(), name: z.string(),
+        address: z.string(), phone: z.string().optional(), website: z.string().optional(),
+        category: z.string(), latitude: z.number(), longitude: z.number(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const profile = await db.createProfile({ userId: ctx.user.id, ...input });
-        const s = calcScore({ ...input });
+        const profile = await db.createProfile(ctx.user.id, input);
+        const s = calcScore(input);
         await db.createScore({ profileId: profile.id, ...s });
         return profile;
       }),
-
-    delete: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(async ({ input, ctx }) => {
-        const profile = await db.getProfileById(input.id);
-        if (!profile || profile.userId !== ctx.user.id) throw new Error("Perfil não encontrado");
-        await db.deleteProfile(input.id);
-        return { success: true };
-      }),
   }),
-
-  // ... (outras rotas tRPC permanecem iguais)
 });
 
 export type AppRouter = typeof appRouter;
