@@ -24,10 +24,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    // Previne erros de resolução de módulos básicos do React
     rollupOptions: {
-      output: {
-        manualChunks: undefined,
-      },
+      external: [],
     },
   },
   server: {
