@@ -1,40 +1,38 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./cookies";
-import { systemRouter } from "./systemRouter";
-import { publicProcedure, router, protectedProcedure } from "./trpc";
-import { z } from "zod";
+import { initTRPC, TRPCError } from "@trpc/server";
+import superjson from "superjson";
+import type { TrpcContext } from "./context";
+import { ZodError } from "zod";
 
-// Corrigido: Aponta para a pasta 'server/' um nível acima
-import * as db from "../db"; 
-import { callGroqAPI } from "../groq"; 
-import { reviewsRouter, generateResponseProcedure } from "../reviews-router"; 
-import { getGoogleOAuthUrl, refreshAccessToken } from "../google-oauth-tokens";
-import { findPlaceFromUrl, getPlaceDetails, getNearbyCompetitors, getCompetitorDetails } from "../places-api";
-
-/* --- RESTO DO CÓDIGO PERMANECE IGUAL --- */
-export const appRouter = router({
-  system: systemRouter,
-  auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return { success: true } as const;
-    }),
-  }),
-  reviews: reviewsRouter,
-  reviewAI: router({
-    generateResponse: generateResponseProcedure,
-  }),
-  profiles: router({
-    list: protectedProcedure.query(async ({ ctx }) => {
-      return db.getProfilesByUserId(ctx.user.id);
-    }),
-    getById: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .query(async ({ input }) => db.getProfileById(input.id)),
-    // ... restante das rotas do ficheiro original
-  }),
+const t = initTRPC.context<TrpcContext>().create({
+  transformer: superjson,
+  errorFormatter({ shape, error }) {
+    return {
+      ...shape,
+      data: {
+        ...shape.data,
+        zodError: error.cause instanceof ZodError ? error.cause.flatten() : null,
+      },
+    };
+  },
 });
 
-export type AppRouter = typeof appRouter;
+export const router = t.router;
+export const publicProcedure = t.procedure;
+
+export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Não autorizado" });
+  }
+  return next({
+    ctx: { user: ctx.user },
+  });
+});
+
+export const adminProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.user || ctx.user.role !== "admin") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso negado" });
+  }
+  return next({
+    ctx: { user: ctx.user },
+  });
+});
