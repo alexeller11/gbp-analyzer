@@ -7,7 +7,13 @@ import { defineConfig } from "vite";
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react({
+      // Garante que o runtime do React seja o correto para produção
+      jsxRuntime: 'automatic',
+    }), 
+    tailwindcss()
+  ],
   root: path.resolve(__dirname, "client"),
   resolve: {
     alias: {
@@ -18,6 +24,11 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
   },
   server: {
     host: true,
