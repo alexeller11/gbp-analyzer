@@ -1,21 +1,28 @@
 import crypto from 'crypto';
 
-// Use uma chave de 32 bytes no .env. Caso não exista, usa um fallback (apenas para dev)
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '12345678901234567890123456789012';
+// Chave secreta (deve ter exatamente 32 caracteres)
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'gbp-analyzer-secure-key-32-chars!';
 const IV_LENGTH = 16;
 
 export function encrypt(text: string): string {
   if (!text) return text;
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY), iv);
-  let encrypted = cipher.update(text);
-  encrypted = Buffer.concat([encrypted, cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted.toString('hex');
+  try {
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY), iv);
+    let encrypted = cipher.update(text);
+    encrypted = Buffer.concat([encrypted, cipher.final()]);
+    const authTag = cipher.getAuthTag();
+    return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted.toString('hex');
+  } catch (error) {
+    console.error("[Crypto] Erro ao criptografar:", error);
+    return text; // Fallback
+  }
 }
 
 export function decrypt(text: string): string {
   if (!text) return text;
+  if (!text.includes(':')) return text; // Se for um token antigo não criptografado, devolve como está
+  
   try {
     const textParts = text.split(':');
     const iv = Buffer.from(textParts[0], 'hex');
@@ -27,7 +34,7 @@ export function decrypt(text: string): string {
     decrypted = Buffer.concat([decrypted, decipher.final()]);
     return decrypted.toString();
   } catch (error) {
-    console.error("[Crypto] Falha ao descriptografar token:", error);
-    return text; // Fallback caso o token antigo ainda não esteja criptografado
+    console.error("[Crypto] Erro ao descriptografar token:", error);
+    return text;
   }
 }
