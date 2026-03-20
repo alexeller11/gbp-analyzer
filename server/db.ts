@@ -1,7 +1,33 @@
-// Adicione isto no topo, junto com os outros imports:
-import { encrypt, decrypt } from "./_core/crypto";
+import { neon, neonConfig } from '@neondatabase/serverless';
+import { drizzle } from 'drizzle-orm/neon-http';
+import { eq, and, or } from 'drizzle-orm';
+import * as schema from '../drizzle/schema';
+import { encrypt, decrypt } from './_core/crypto';
 
-// Substitua as funções existentes por estas:
+// Otimiza a ligação serverless ao Neon
+neonConfig.fetchConnectionCache = true;
+
+let dbInstance: ReturnType<typeof drizzle> | null = null;
+
+/**
+ * Inicia ou recupera a ligação ao banco de dados Neon
+ */
+export async function getDb() {
+  if (!dbInstance) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      console.error("[DB] ERRO: DATABASE_URL não está definida no ficheiro .env");
+      throw new Error("DATABASE_URL não encontrada");
+    }
+    const sql = neon(databaseUrl);
+    dbInstance = drizzle(sql, { schema });
+  }
+  return dbInstance;
+}
+
+/**
+ * Guarda o token do Google de forma encriptada na base de dados
+ */
 export async function storeGoogleToken(
   userId: number,
   googleAccountId: string,
@@ -13,11 +39,12 @@ export async function storeGoogleToken(
   if (!db) throw new Error("Banco de dados não conectado");
 
   try {
-    const { googleTokens } = await import("../drizzle/schema");
-    // Remove o token antigo
+    const { googleTokens } = schema;
+    
+    // Remove o token antigo, se existir, para evitar duplicações
     await db.delete(googleTokens).where(eq(googleTokens.userId, userId));
     
-    // Insere o novo token criptografado
+    // Insere o novo token devidamente encriptado
     await db.insert(googleTokens).values({
       userId,
       googleAccountId,
@@ -26,24 +53,32 @@ export async function storeGoogleToken(
       expiresAt: expiresAt || null,
       scope: "https://www.googleapis.com/auth/business.manage",
     });
-    console.log(`[DB] Token do utilizador ${userId} guardado com segurança.`);
+    
+    console.log(`[DB] Token do utilizador ${userId} guardado com segurança (Encriptado).`);
   } catch (error) {
     console.error("[DB] Erro ao guardar Google Token:", error);
     throw error;
   }
 }
 
+/**
+ * Recupera e desencripta o token do Google para ser usado nas APIs
+ */
 export async function getGoogleToken(userId: number) {
   const db = await getDb();
   if (!db) return null;
 
   try {
-    const { googleTokens } = await import("../drizzle/schema");
-    const result = await db.select().from(googleTokens).where(eq(googleTokens.userId, userId)).limit(1);
+    const { googleTokens } = schema;
+    const result = await db.select()
+      .from(googleTokens)
+      .where(eq(googleTokens.userId, userId))
+      .limit(1);
     
     const tokenRecord = result[0] ?? null;
+    
     if (tokenRecord) {
-      // Descriptografa antes de entregar ao sistema
+      // Desencripta os tokens antes de os entregar ao sistema para uso
       tokenRecord.accessToken = decrypt(tokenRecord.accessToken);
       if (tokenRecord.refreshToken) {
         tokenRecord.refreshToken = decrypt(tokenRecord.refreshToken);
@@ -53,5 +88,24 @@ export async function getGoogleToken(userId: number) {
   } catch (error) {
     console.error("[DB] Erro ao recuperar Google Token:", error);
     return null;
+  }
+}
+
+/**
+ * Cria um novo perfil de empresa (Google Business Profile)
+ */
+export async function createProfile(userId: number, data: any) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados não conectado");
+
+  try {
+    const result = await db.insert(schema.profiles).values({
+      userId,
+      ...data
+    }).returning();
+    return result[0];
+  } catch (error) {
+    console.error("[DB] Erro ao criar perfil:", error);
+    throw error;
   }
 }
