@@ -13,10 +13,24 @@ type MeResponse = {
   };
 };
 
+type ImportResult = {
+  accountsImported: number;
+  locationsImported: number;
+  businessesImported: number;
+  accounts: Array<{
+    accountId: string;
+    accountName: string | null;
+    locations: number;
+  }>;
+};
+
 function App() {
   const [loading, setLoading] = React.useState(true);
   const [authenticated, setAuthenticated] = React.useState(false);
   const [user, setUser] = React.useState<MeResponse["user"] | null>(null);
+  const [importing, setImporting] = React.useState(false);
+  const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
+  const [importError, setImportError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     fetch("/api/auth/me", {
@@ -49,6 +63,30 @@ function App() {
     });
 
     window.location.href = "/";
+  }
+
+  async function handleImportPortfolio() {
+    setImporting(true);
+    setImportError(null);
+
+    try {
+      const response = await fetch("/api/gbp/import", {
+        method: "POST",
+        credentials: "include"
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao importar contas");
+      }
+
+      setImportResult(data.result);
+    } catch (error: any) {
+      setImportError(error?.message || "Erro ao importar contas");
+    } finally {
+      setImporting(false);
+    }
   }
 
   if (loading) {
@@ -97,6 +135,27 @@ function App() {
         <strong>Escopos concedidos:</strong>
         <pre>{JSON.stringify(user?.scopes ?? [], null, 2)}</pre>
       </div>
+
+      {user?.googleBusinessConnected && (
+        <div style={{ marginTop: 24 }}>
+          <button onClick={handleImportPortfolio} disabled={importing}>
+            {importing ? "Importando..." : "Importar meus perfis do Google Business"}
+          </button>
+        </div>
+      )}
+
+      {importError && (
+        <div style={{ marginTop: 16, color: "crimson" }}>
+          <strong>Erro:</strong> {importError}
+        </div>
+      )}
+
+      {importResult && (
+        <div style={{ marginTop: 24 }}>
+          <h2>Importação concluída</h2>
+          <pre>{JSON.stringify(importResult, null, 2)}</pre>
+        </div>
+      )}
 
       <div style={{ marginTop: 16 }}>
         <button onClick={handleLogout}>Sair</button>
