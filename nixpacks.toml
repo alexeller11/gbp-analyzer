@@ -16,4 +16,4 @@ cmds = [
 ]
 
 [start]
-cmd = "pnpm start"
+cmd = "pnpm db:push && pnpm start"
