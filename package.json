@@ -85,9 +85,9 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.4",
-    "typescript": "5.9.3",
     "@types/react": "^19.2.1",
-    "@types/react-dom": "^19.2.1"
+    "@types/react-dom": "^19.2.1",
+    "drizzle-kit": "^0.31.4",
+    "typescript": "5.9.3"
   }
 }
