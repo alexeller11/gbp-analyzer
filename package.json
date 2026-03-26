@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.0.0",
   "scripts": {
     "dev": "tsx watch server/_core/index.ts",
-    "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist --loader:.ts=ts",
+    "build": "vite build --outDir dist/public && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist --loader:.ts=ts",
     "start": "node dist/index.js",
     "db:push": "drizzle-kit push"
   },
