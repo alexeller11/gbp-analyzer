@@ -37,6 +37,10 @@ app.get("/health", async (_req, res) => {
   }
 });
 
+console.log("Diretório do servidor:", __dirname);
+console.log("Diretório público esperado:", publicPath);
+console.log("index.html existe?", existsSync(indexHtmlPath));
+
 if (existsSync(indexHtmlPath)) {
   app.use(express.static(publicPath));
 
