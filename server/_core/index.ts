@@ -1,9 +1,21 @@
 import "dotenv/config";
 import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 import { testDatabaseConnection } from "../db";
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Como o server bundle fica em /dist/index.js
+// e o build do Vite também gera arquivos em /dist,
+// o diretório público final é o próprio /dist
+const distPath = __dirname;
+const indexHtmlPath = path.join(distPath, "index.html");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -11,20 +23,44 @@ app.use(express.urlencoded({ extended: true }));
 app.get("/health", async (_req, res) => {
   try {
     await testDatabaseConnection();
+
     return res.status(200).json({
       ok: true,
       app: "gbp-analyzer",
-      database: "connected",
+      database: "connected"
     });
   } catch (error) {
     console.error("Erro no healthcheck:", error);
+
     return res.status(500).json({
       ok: false,
       app: "gbp-analyzer",
-      database: "error",
+      database: "error"
     });
   }
 });
+
+// Serve arquivos estáticos gerados pelo Vite
+if (existsSync(indexHtmlPath)) {
+  app.use(express.static(distPath));
+
+  // fallback SPA
+  app.get("*", (req, res, next) => {
+    if (
+      req.path.startsWith("/api") ||
+      req.path.startsWith("/health")
+    ) {
+      return next();
+    }
+
+    return res.sendFile(indexHtmlPath);
+  });
+} else {
+  // fallback simples caso o index.html não exista
+  app.get("/", (_req, res) => {
+    return res.status(200).send("GBP Analyzer online");
+  });
+}
 
 app.listen(PORT, async () => {
   console.log(`GBP Analyzer ativo na porta ${PORT}`);
