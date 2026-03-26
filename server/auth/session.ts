@@ -6,6 +6,8 @@ export type SessionUser = {
   email: string;
   name?: string;
   picture?: string;
+  scopes?: string[];
+  googleBusinessConnected?: boolean;
 };
 
 function getJwtSecret() {
@@ -21,7 +23,9 @@ export async function createSessionToken(user: SessionUser) {
     sub: user.id,
     email: user.email,
     name: user.name,
-    picture: user.picture
+    picture: user.picture,
+    scopes: user.scopes ?? [],
+    googleBusinessConnected: Boolean(user.googleBusinessConnected)
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
@@ -36,6 +40,10 @@ export async function verifySessionToken(token: string) {
     id: String(payload.sub || ""),
     email: String(payload.email || ""),
     name: payload.name ? String(payload.name) : undefined,
-    picture: payload.picture ? String(payload.picture) : undefined
+    picture: payload.picture ? String(payload.picture) : undefined,
+    scopes: Array.isArray(payload.scopes)
+      ? payload.scopes.map((item) => String(item))
+      : [],
+    googleBusinessConnected: Boolean(payload.googleBusinessConnected)
   } satisfies SessionUser;
 }
