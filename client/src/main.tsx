@@ -1,61 +1,81 @@
-import { trpc } from "@/lib/trpc";
-import { UNAUTHED_ERR_MSG } from '@shared/const';
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { httpBatchLink, TRPCClientError } from "@trpc/client";
-import { createRoot } from "react-dom/client";
-import superjson from "superjson";
-import App from "./App";
-import { getLoginUrl } from "./const";
-import "./index.css";
+import React from "react";
+import ReactDOM from "react-dom/client";
 
-const queryClient = new QueryClient();
+function App() {
+  const [loading, setLoading] = React.useState(true);
+  const [authenticated, setAuthenticated] = React.useState(false);
+  const [user, setUser] = React.useState<any>(null);
 
-const redirectToLoginIfUnauthorized = (error: unknown) => {
-  if (!(error instanceof TRPCClientError)) return;
-  if (typeof window === "undefined") return;
+  React.useEffect(() => {
+    fetch("/api/auth/me", {
+      credentials: "include"
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          setAuthenticated(false);
+          setUser(null);
+          return;
+        }
 
-  const isUnauthorized = error.message === UNAUTHED_ERR_MSG;
+        const data = await res.json();
+        setAuthenticated(Boolean(data.authenticated));
+        setUser(data.user ?? null);
+      })
+      .catch(() => {
+        setAuthenticated(false);
+        setUser(null);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
 
-  if (!isUnauthorized) return;
+  async function handleLogout() {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include"
+    });
 
-  window.location.href = getLoginUrl();
-};
-
-queryClient.getQueryCache().subscribe(event => {
-  if (event.type === "updated" && event.action.type === "error") {
-    const error = event.query.state.error;
-    redirectToLoginIfUnauthorized(error);
-    console.error("[API Query Error]", error);
+    window.location.href = "/";
   }
-});
 
-queryClient.getMutationCache().subscribe(event => {
-  if (event.type === "updated" && event.action.type === "error") {
-    const error = event.mutation.state.error;
-    redirectToLoginIfUnauthorized(error);
-    console.error("[API Mutation Error]", error);
+  if (loading) {
+    return (
+      <div style={{ padding: 32, fontFamily: "Arial, sans-serif" }}>
+        Carregando...
+      </div>
+    );
   }
-});
 
-const trpcClient = trpc.createClient({
-  links: [
-    httpBatchLink({
-      url: "/api/trpc",
-      transformer: superjson,
-      fetch(input, init) {
-        return globalThis.fetch(input, {
-          ...(init ?? {}),
-          credentials: "include",
-        });
-      },
-    }),
-  ],
-});
+  if (!authenticated) {
+    return (
+      <div style={{ padding: 32, fontFamily: "Arial, sans-serif" }}>
+        <h1>GBP Analyzer</h1>
+        <p>Você ainda não está logado.</p>
+        <a href="/api/auth/google-login">Entrar com Google</a>
+      </div>
+    );
+  }
 
-createRoot(document.getElementById("root")!).render(
-  <trpc.Provider client={trpcClient} queryClient={queryClient}>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </trpc.Provider>
+  return (
+    <div style={{ padding: 32, fontFamily: "Arial, sans-serif" }}>
+      <h1>GBP Analyzer</h1>
+      <p>Login realizado com sucesso.</p>
+      <pre>{JSON.stringify(user, null, 2)}</pre>
+
+      <div style={{ marginTop: 16 }}>
+        <a href="/api/auth/google-business-connect">Conectar Google Business Profile</a>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <button onClick={handleLogout}>Sair</button>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
 );
