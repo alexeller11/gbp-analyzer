@@ -4,7 +4,9 @@ import {
   getGoogleLoginUrl,
   getGoogleBusinessConnectUrl,
   exchangeCodeForToken,
-  getGoogleUserInfo
+  getGoogleUserInfo,
+  parseScopes,
+  hasBusinessManageScope
 } from "../google/oauth.service";
 import { createSessionToken, verifySessionToken } from "../auth/session";
 
@@ -62,19 +64,24 @@ router.get("/api/oauth/google/callback", async (req, res) => {
 
     const token = await exchangeCodeForToken(code);
     const userInfo = await getGoogleUserInfo(token.access_token);
+    const scopes = parseScopes(token.scope);
+    const googleBusinessConnected = hasBusinessManageScope(scopes);
 
     console.log("OAuth Google concluído:", {
       id: userInfo.id,
       email: userInfo.email,
       name: userInfo.name,
-      scope: token.scope
+      scope: token.scope,
+      googleBusinessConnected
     });
 
     const sessionToken = await createSessionToken({
       id: userInfo.id,
       email: userInfo.email,
       name: userInfo.name,
-      picture: userInfo.picture
+      picture: userInfo.picture,
+      scopes,
+      googleBusinessConnected
     });
 
     res.clearCookie("google_oauth_state");
@@ -87,7 +94,11 @@ router.get("/api/oauth/google/callback", async (req, res) => {
     });
 
     const appUrl = process.env.APP_URL || "/";
-    return res.redirect(`${appUrl}?googleLogin=success`);
+    const redirectSuffix = googleBusinessConnected
+      ? "?googleBusiness=connected"
+      : "?googleLogin=success";
+
+    return res.redirect(`${appUrl}${redirectSuffix}`);
   } catch (error: any) {
     console.error("Erro no callback Google:", error);
     return res.status(500).send(error?.message || "Erro no callback Google");
