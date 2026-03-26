@@ -9,6 +9,10 @@ import {
   hasBusinessManageScope
 } from "../google/oauth.service";
 import { createSessionToken, verifySessionToken } from "../auth/session";
+import {
+  upsertUserFromGoogle,
+  upsertGoogleConnection
+} from "../services/google-connection.service";
 
 const router = Router();
 
@@ -67,6 +71,25 @@ router.get("/api/oauth/google/callback", async (req, res) => {
     const scopes = parseScopes(token.scope);
     const googleBusinessConnected = hasBusinessManageScope(scopes);
 
+    const user = await upsertUserFromGoogle({
+      openId: userInfo.id,
+      email: userInfo.email,
+      name: userInfo.name,
+      picture: userInfo.picture
+    });
+
+    await upsertGoogleConnection({
+      userId: user.id,
+      googleUserId: userInfo.id,
+      googleEmail: userInfo.email,
+      googleName: userInfo.name,
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      scope: token.scope,
+      expiresIn: token.expires_in,
+      googleBusinessConnected
+    });
+
     console.log("OAuth Google concluído:", {
       id: userInfo.id,
       email: userInfo.email,
@@ -76,10 +99,10 @@ router.get("/api/oauth/google/callback", async (req, res) => {
     });
 
     const sessionToken = await createSessionToken({
-      id: userInfo.id,
-      email: userInfo.email,
-      name: userInfo.name,
-      picture: userInfo.picture,
+      id: String(user.id),
+      email: user.email,
+      name: user.name ?? undefined,
+      picture: user.picture ?? undefined,
       scopes,
       googleBusinessConnected
     });
@@ -121,7 +144,7 @@ router.get("/api/auth/me", async (req, res) => {
       authenticated: true,
       user
     });
-  } catch (error) {
+  } catch (_error) {
     return res.status(401).json({
       authenticated: false
     });
