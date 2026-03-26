@@ -106,3 +106,15 @@ export async function getGoogleUserInfo(accessToken: string): Promise<GoogleUser
 
   return response.json();
 }
+
+export function parseScopes(scope?: string): string[] {
+  if (!scope) return [];
+  return scope
+    .split(" ")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function hasBusinessManageScope(scopes: string[]) {
+  return scopes.includes("https://www.googleapis.com/auth/business.manage");
+}
