@@ -11,11 +11,8 @@ const PORT = Number(process.env.PORT || 8080);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Como o server bundle fica em /dist/index.js
-// e o build do Vite também gera arquivos em /dist,
-// o diretório público final é o próprio /dist
-const distPath = __dirname;
-const indexHtmlPath = path.join(distPath, "index.html");
+const publicPath = path.join(__dirname, "public");
+const indexHtmlPath = path.join(publicPath, "index.html");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -40,23 +37,17 @@ app.get("/health", async (_req, res) => {
   }
 });
 
-// Serve arquivos estáticos gerados pelo Vite
 if (existsSync(indexHtmlPath)) {
-  app.use(express.static(distPath));
+  app.use(express.static(publicPath));
 
-  // fallback SPA
   app.get("*", (req, res, next) => {
-    if (
-      req.path.startsWith("/api") ||
-      req.path.startsWith("/health")
-    ) {
+    if (req.path.startsWith("/api") || req.path.startsWith("/health")) {
       return next();
     }
 
     return res.sendFile(indexHtmlPath);
   });
 } else {
-  // fallback simples caso o index.html não exista
   app.get("/", (_req, res) => {
     return res.status(200).send("GBP Analyzer online");
   });
