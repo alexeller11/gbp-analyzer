@@ -6,6 +6,7 @@ import {
   exchangeCodeForToken,
   getGoogleUserInfo
 } from "../google/oauth.service";
+import { createSessionToken, verifySessionToken } from "../auth/session";
 
 const router = Router();
 
@@ -69,13 +70,63 @@ router.get("/api/oauth/google/callback", async (req, res) => {
       scope: token.scope
     });
 
-    const appUrl = process.env.APP_URL || "/";
+    const sessionToken = await createSessionToken({
+      id: userInfo.id,
+      email: userInfo.email,
+      name: userInfo.name,
+      picture: userInfo.picture
+    });
 
+    res.clearCookie("google_oauth_state");
+
+    res.cookie("gbp_session", sessionToken, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    const appUrl = process.env.APP_URL || "/";
     return res.redirect(`${appUrl}?googleLogin=success`);
   } catch (error: any) {
     console.error("Erro no callback Google:", error);
     return res.status(500).send(error?.message || "Erro no callback Google");
   }
+});
+
+router.get("/api/auth/me", async (req, res) => {
+  try {
+    const token = req.cookies?.gbp_session;
+
+    if (!token) {
+      return res.status(401).json({
+        authenticated: false
+      });
+    }
+
+    const user = await verifySessionToken(token);
+
+    return res.status(200).json({
+      authenticated: true,
+      user
+    });
+  } catch (error) {
+    return res.status(401).json({
+      authenticated: false
+    });
+  }
+});
+
+router.post("/api/auth/logout", async (_req, res) => {
+  res.clearCookie("gbp_session", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: true
+  });
+
+  return res.status(200).json({
+    ok: true
+  });
 });
 
 export default router;
