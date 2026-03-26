@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { testDatabaseConnection } from "../db";
 import googleAuthRoutes from "../routes/google-auth.routes";
+import gbpRoutes from "../routes/gbp.routes";
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
@@ -21,6 +22,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use(googleAuthRoutes);
+app.use(gbpRoutes);
 
 app.get("/health", async (_req, res) => {
   try {
