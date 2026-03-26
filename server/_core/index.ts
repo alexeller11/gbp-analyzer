@@ -50,10 +50,7 @@ if (existsSync(indexHtmlPath)) {
   app.use(express.static(publicPath));
 
   app.get("*", (req, res, next) => {
-    if (
-      req.path.startsWith("/api") ||
-      req.path.startsWith("/health")
-    ) {
+    if (req.path.startsWith("/api") || req.path.startsWith("/health")) {
       return next();
     }
 
