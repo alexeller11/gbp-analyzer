@@ -4,10 +4,16 @@ providers = ["node"]
 nixPkgs = ["nodejs_20", "nodePackages.pnpm"]
 
 [phases.install]
-cmds = ["pnpm install --no-frozen-lockfile"]
+cmds = [
+  "echo '--- INSTALL PHASE ---'",
+  "pnpm install --no-frozen-lockfile"
+]
 
 [phases.build]
-cmds = ["pnpm build"]
+cmds = [
+  "echo '--- BUILD PHASE ---'",
+  "pnpm build"
+]
 
 [start]
 cmd = "pnpm start"
