@@ -118,3 +118,28 @@ export function parseScopes(scope?: string): string[] {
 export function hasBusinessManageScope(scopes: string[]) {
   return scopes.includes("https://www.googleapis.com/auth/business.manage");
 }
+
+export async function refreshGoogleAccessToken(refreshToken: string): Promise<GoogleTokenResponse> {
+  const clientId = getRequiredEnv("GOOGLE_OAUTH_CLIENT_ID");
+  const clientSecret = getRequiredEnv("GOOGLE_OAUTH_CLIENT_SECRET");
+
+  const response = await fetch(GOOGLE_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token"
+    }).toString()
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Falha ao renovar token: ${errorText}`);
+  }
+
+  return response.json();
+}
