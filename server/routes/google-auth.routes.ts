@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { randomBytes } from "node:crypto";
 import {
-  getGoogleAuthUrl,
+  getGoogleLoginUrl,
+  getGoogleBusinessConnectUrl,
   exchangeCodeForToken,
   getGoogleUserInfo
 } from "../google/oauth.service";
@@ -19,10 +20,28 @@ router.get("/api/auth/google-login", async (_req, res) => {
       maxAge: 10 * 60 * 1000
     });
 
-    return res.redirect(getGoogleAuthUrl(state));
+    return res.redirect(getGoogleLoginUrl(state));
   } catch (error: any) {
     console.error("Erro ao iniciar login Google:", error);
     return res.status(500).send(error?.message || "Erro ao iniciar login Google");
+  }
+});
+
+router.get("/api/auth/google-business-connect", async (_req, res) => {
+  try {
+    const state = randomBytes(16).toString("hex");
+
+    res.cookie("google_oauth_state", state, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: true,
+      maxAge: 10 * 60 * 1000
+    });
+
+    return res.redirect(getGoogleBusinessConnectUrl(state));
+  } catch (error: any) {
+    console.error("Erro ao iniciar conexão com Google Business:", error);
+    return res.status(500).send(error?.message || "Erro ao iniciar conexão com Google Business");
   }
 });
 
@@ -43,10 +62,11 @@ router.get("/api/oauth/google/callback", async (req, res) => {
     const token = await exchangeCodeForToken(code);
     const userInfo = await getGoogleUserInfo(token.access_token);
 
-    console.log("Login Google concluído:", {
+    console.log("OAuth Google concluído:", {
       id: userInfo.id,
       email: userInfo.email,
-      name: userInfo.name
+      name: userInfo.name,
+      scope: token.scope
     });
 
     const appUrl = process.env.APP_URL || "/";
