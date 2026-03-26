@@ -31,7 +31,7 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
-export function getGoogleAuthUrl(state: string) {
+function buildGoogleAuthUrl(state: string, scopes: string[]) {
   const clientId = getRequiredEnv("GOOGLE_OAUTH_CLIENT_ID");
   const redirectUri = getRequiredEnv("GOOGLE_OAUTH_REDIRECT_URI");
 
@@ -41,16 +41,28 @@ export function getGoogleAuthUrl(state: string) {
     response_type: "code",
     access_type: "offline",
     prompt: "consent",
-    scope: [
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/business.manage"
-    ].join(" "),
+    scope: scopes.join(" "),
     state
   });
 
   return `${GOOGLE_AUTH_BASE}?${params.toString()}`;
+}
+
+export function getGoogleLoginUrl(state: string) {
+  return buildGoogleAuthUrl(state, [
+    "openid",
+    "email",
+    "profile"
+  ]);
+}
+
+export function getGoogleBusinessConnectUrl(state: string) {
+  return buildGoogleAuthUrl(state, [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/business.manage"
+  ]);
 }
 
 export async function exchangeCodeForToken(code: string): Promise<GoogleTokenResponse> {
