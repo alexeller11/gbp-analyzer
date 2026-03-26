@@ -1,9 +1,11 @@
 import "dotenv/config";
 import express from "express";
+import cookieParser from "cookie-parser";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { testDatabaseConnection } from "../db";
+import googleAuthRoutes from "../routes/google-auth.routes";
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
@@ -14,8 +16,11 @@ const __dirname = path.dirname(__filename);
 const publicPath = path.join(__dirname, "public");
 const indexHtmlPath = path.join(publicPath, "index.html");
 
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use(googleAuthRoutes);
 
 app.get("/health", async (_req, res) => {
   try {
@@ -45,7 +50,10 @@ if (existsSync(indexHtmlPath)) {
   app.use(express.static(publicPath));
 
   app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api") || req.path.startsWith("/health")) {
+    if (
+      req.path.startsWith("/api") ||
+      req.path.startsWith("/health")
+    ) {
       return next();
     }
 
