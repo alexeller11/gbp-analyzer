@@ -1,7 +1,15 @@
+export type GbpAccountType =
+  | "PERSONAL"
+  | "ORGANIZATION"
+  | "LOCATION_GROUP"
+  | "USER_GROUP"
+  | string;
+
 export type GbpAccount = {
-  name: string;
+  name: string; // accounts/123
   accountName?: string;
-  type?: string;
+  type?: GbpAccountType;
+  role?: string;
 };
 
 export type GbpLocation = {
@@ -45,21 +53,79 @@ export function parseLocationId(locationName: string): string {
   return parts[parts.length - 1] || "";
 }
 
-export async function listAccounts(accessToken: string): Promise<GbpAccount[]> {
-  const response = await fetch(
-    "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-    {
-      headers: authHeaders(accessToken)
-    }
-  );
+export function isContainerAccount(type?: string) {
+  return type === "ORGANIZATION" || type === "USER_GROUP";
+}
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`accounts.list falhou: ${errorText}`);
+export async function listAccounts(
+  accessToken: string,
+  parentAccountName?: string
+): Promise<GbpAccount[]> {
+  const allAccounts: GbpAccount[] = [];
+  let pageToken: string | undefined = undefined;
+
+  do {
+    const params = new URLSearchParams();
+
+    if (parentAccountName) {
+      params.set("name", parentAccountName);
+    }
+
+    if (pageToken) {
+      params.set("pageToken", pageToken);
+    }
+
+    const url = `https://mybusinessaccountmanagement.googleapis.com/v1/accounts${
+      params.toString() ? `?${params.toString()}` : ""
+    }`;
+
+    const response = await fetch(url, {
+      headers: authHeaders(accessToken)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`accounts.list falhou: ${errorText}`);
+    }
+
+    const data = await response.json();
+    allAccounts.push(...(data.accounts ?? []));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return allAccounts;
+}
+
+/**
+ * Descobre todas as contas acessíveis ao usuário, inclusive contas filhas
+ * dentro de ORGANIZATION e USER_GROUP.
+ */
+export async function discoverAllAccounts(accessToken: string): Promise<GbpAccount[]> {
+  const visited = new Set<string>();
+  const queue: GbpAccount[] = await listAccounts(accessToken);
+  const result: GbpAccount[] = [];
+
+  while (queue.length > 0) {
+    const account = queue.shift()!;
+    if (!account?.name || visited.has(account.name)) {
+      continue;
+    }
+
+    visited.add(account.name);
+    result.push(account);
+
+    if (isContainerAccount(account.type)) {
+      const childAccounts = await listAccounts(accessToken, account.name);
+
+      for (const child of childAccounts) {
+        if (child?.name && !visited.has(child.name)) {
+          queue.push(child);
+        }
+      }
+    }
   }
 
-  const data = await response.json();
-  return data.accounts ?? [];
+  return result;
 }
 
 export async function listLocations(
@@ -101,7 +167,19 @@ export async function listLocations(
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`locations.list falhou: ${errorText}`);
+
+      // Algumas contas "contêiner" ou tipos sem locations diretas podem retornar erro.
+      // Em vez de quebrar a importação inteira, devolvemos vazio nesses casos.
+      if (
+        errorText.includes("does not support this method") ||
+        errorText.includes("INVALID_ARGUMENT") ||
+        errorText.includes("not found") ||
+        errorText.includes("PERMISSION_DENIED")
+      ) {
+        return [];
+      }
+
+      throw new Error(`locations.list falhou para accountId=${accountId}: ${errorText}`);
     }
 
     const data = await response.json();
