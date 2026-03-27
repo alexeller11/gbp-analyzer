@@ -1,8 +1,8 @@
-import { calculateGbpScore } from "../services/gbp-score.service";
 import { Router } from "express";
 import { eq, asc, desc } from "drizzle-orm";
 import { verifySessionToken } from "../auth/session";
 import { importGoogleBusinessPortfolio } from "../services/google-import.service";
+import { calculateGbpScore } from "../services/gbp-score.service";
 import { db } from "../db";
 import { gbpAccounts, gbpLocations, businesses } from "../../drizzle/schema";
 
@@ -57,6 +57,7 @@ router.get("/api/gbp/accounts", async (req, res) => {
     });
 
     const locationsByAccountId = new Map<number, number>();
+
     for (const location of locations) {
       locationsByAccountId.set(
         location.gbpAccountId,
@@ -108,7 +109,7 @@ router.get("/api/gbp/businesses", async (req, res) => {
     });
 
     const accountMap = new Map(allAccounts.map((account) => [account.id, account]));
-    const locationByBusinessId = new Map<number, typeof allLocations[number]>();
+    const locationByBusinessId = new Map<number, (typeof allLocations)[number]>();
 
     for (const location of allLocations) {
       if (!locationByBusinessId.has(location.businessId)) {
@@ -118,8 +119,23 @@ router.get("/api/gbp/businesses", async (req, res) => {
 
     const rows = allBusinesses
       .map((business) => {
-        const location = locationByBusinessId.get(business.id);
-        const account = location ? accountMap.get(location.gbpAccountId) : null;
+        const location = locationByBusinessId.get(business.id) ?? null;
+        const account = location ? accountMap.get(location.gbpAccountId) ?? null : null;
+
+        const scoreData = calculateGbpScore({
+          name: business.name,
+          primaryCategory: business.primaryCategory,
+          city: business.city,
+          state: business.state,
+          phone: business.phone,
+          website: business.website,
+          location: location
+            ? {
+                isVerified: location.isVerified,
+                verificationState: location.verificationState
+              }
+            : null
+        });
 
         return {
           id: business.id,
@@ -134,6 +150,9 @@ router.get("/api/gbp/businesses", async (req, res) => {
           googleLocationKey: business.googleLocationKey,
           createdAt: business.createdAt,
           updatedAt: business.updatedAt,
+          score: scoreData.score,
+          insights: scoreData.insights,
+          breakdown: scoreData.breakdown,
           location: location
             ? {
                 id: location.id,
@@ -161,6 +180,7 @@ router.get("/api/gbp/businesses", async (req, res) => {
       })
       .filter((row) => {
         if (!accountId) return true;
+        if (accountId === "all") return true;
         return row.account?.accountId === accountId;
       });
 
