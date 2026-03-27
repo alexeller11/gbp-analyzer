@@ -5,6 +5,7 @@ export type GbpScoredBusinessInput = {
   state: string | null;
   phone: string | null;
   website: string | null;
+  portfolioType?: string | null;
   location: {
     isVerified: boolean;
     verificationState: string | null;
@@ -13,7 +14,10 @@ export type GbpScoredBusinessInput = {
 
 export type GbpScoreResult = {
   score: number;
+  opportunityScore: number;
+  opportunityLevel: "baixa" | "media" | "alta";
   insights: string[];
+  priorities: string[];
   breakdown: {
     name: number;
     category: number;
@@ -30,6 +34,7 @@ export function calculateGbpScore(
 ): GbpScoreResult {
   let score = 0;
   const insights: string[] = [];
+  const priorities: string[] = [];
 
   const breakdown = {
     name: 0,
@@ -46,6 +51,7 @@ export function calculateGbpScore(
     score += breakdown.name;
   } else {
     insights.push("Nome do perfil ausente ou incompleto");
+    priorities.push("Revisar o nome do perfil");
   }
 
   if (business.primaryCategory?.trim()) {
@@ -53,6 +59,7 @@ export function calculateGbpScore(
     score += breakdown.category;
   } else {
     insights.push("Categoria principal não definida corretamente");
+    priorities.push("Definir ou revisar a categoria principal");
   }
 
   if (business.phone?.trim()) {
@@ -60,6 +67,7 @@ export function calculateGbpScore(
     score += breakdown.phone;
   } else {
     insights.push("Telefone não cadastrado");
+    priorities.push("Cadastrar telefone");
   }
 
   if (business.website?.trim()) {
@@ -67,6 +75,7 @@ export function calculateGbpScore(
     score += breakdown.website;
   } else {
     insights.push("Site não vinculado ao perfil");
+    priorities.push("Adicionar site ou landing page");
   }
 
   if (business.city?.trim() && business.state?.trim()) {
@@ -74,6 +83,7 @@ export function calculateGbpScore(
     score += breakdown.city;
   } else {
     insights.push("Cidade ou estado incompletos no perfil");
+    priorities.push("Revisar localização e consistência geográfica");
   }
 
   if (business.location?.isVerified) {
@@ -81,6 +91,7 @@ export function calculateGbpScore(
     score += breakdown.verification;
   } else {
     insights.push("Perfil não verificado no Google");
+    priorities.push("Solicitar ou concluir a verificação do perfil");
   }
 
   if (
@@ -92,13 +103,32 @@ export function calculateGbpScore(
     score += breakdown.consistencyBonus;
   } else {
     insights.push("Perfil sem consistência completa de informações básicas");
+    priorities.push("Completar informações essenciais do perfil");
   }
 
   score = Math.max(0, Math.min(100, score));
 
+  let opportunityScore = 0;
+
+  if (!business.location?.isVerified) opportunityScore += 35;
+  if (!business.website?.trim()) opportunityScore += 20;
+  if (!business.phone?.trim()) opportunityScore += 10;
+  if (!business.primaryCategory?.trim()) opportunityScore += 20;
+  if (score < 50) opportunityScore += 25;
+  if (business.portfolioType === "prospect") opportunityScore += 10;
+
+  opportunityScore = Math.max(0, Math.min(100, opportunityScore));
+
+  let opportunityLevel: "baixa" | "media" | "alta" = "baixa";
+  if (opportunityScore >= 60) opportunityLevel = "alta";
+  else if (opportunityScore >= 30) opportunityLevel = "media";
+
   return {
     score,
+    opportunityScore,
+    opportunityLevel,
     insights,
+    priorities,
     breakdown
   };
 }
