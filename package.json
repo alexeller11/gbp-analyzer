@@ -7,7 +7,7 @@
     "dev": "tsx watch server/_core/index.ts",
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist --loader:.ts=ts",
     "start": "node dist/index.js",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push --force"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
@@ -90,7 +90,7 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.1",
     "@types/react-dom": "^19.2.1",
-    "drizzle-kit": "^0.31.4",
+    "drizzle-kit": "^0.31.10",
     "typescript": "5.9.3"
   }
 }
