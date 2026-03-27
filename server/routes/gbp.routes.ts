@@ -14,7 +14,7 @@ async function getAuthenticatedUserId(req: any) {
   const user = await verifySessionToken(token);
   const numericUserId = Number(user.id);
 
-  if (!Number.isFinite(numericUserId)) {
+  if (!Number.isFinite(numericUserId) || numericUserId <= 0) {
     throw new Error("Sessão inválida");
   }
 
