@@ -91,7 +91,8 @@ router.get("/api/oauth/google/callback", async (req, res) => {
     });
 
     console.log("OAuth Google concluído:", {
-      id: userInfo.id,
+      dbUserId: user.id,
+      googleOpenId: userInfo.id,
       email: userInfo.email,
       name: userInfo.name,
       scope: token.scope,
@@ -100,6 +101,7 @@ router.get("/api/oauth/google/callback", async (req, res) => {
 
     const sessionToken = await createSessionToken({
       id: String(user.id),
+      googleOpenId: userInfo.id,
       email: user.email,
       name: user.name ?? undefined,
       picture: user.picture ?? undefined,
