@@ -5,6 +5,7 @@ type MeResponse = {
   authenticated: boolean;
   user?: {
     id: string;
+    googleOpenId?: string;
     email: string;
     name?: string;
     picture?: string;
