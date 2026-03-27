@@ -49,10 +49,23 @@ type BusinessRow = {
   status: string;
   source: string;
   googleLocationKey: string;
+  portfolioType: string;
+  notes: string | null;
+  aiSummaryJson: {
+    summary?: string;
+    rankingDiagnosis?: string;
+    priorities?: string[];
+    opportunityAnalysis?: string;
+    pitch?: string;
+  } | null;
+  lastAiAnalysisAt: string | null;
   createdAt: string;
   updatedAt: string;
   score: number;
+  opportunityScore: number;
+  opportunityLevel: "baixa" | "media" | "alta";
   insights: string[];
+  priorities: string[];
   breakdown: {
     name: number;
     category: number;
@@ -94,7 +107,7 @@ const styles = {
     padding: "24px"
   } as React.CSSProperties,
   shell: {
-    maxWidth: "1400px",
+    maxWidth: "1460px",
     margin: "0 auto"
   } as React.CSSProperties,
   hero: {
@@ -109,14 +122,14 @@ const styles = {
     flexWrap: "wrap"
   } as React.CSSProperties,
   title: {
-    fontSize: "32px",
-    fontWeight: 800,
+    fontSize: "34px",
+    fontWeight: 900,
     margin: 0,
-    letterSpacing: "-0.02em"
+    letterSpacing: "-0.03em"
   } as React.CSSProperties,
   subtitle: {
     margin: "8px 0 0",
-    color: "rgba(255,255,255,0.75)",
+    color: "rgba(255,255,255,0.78)",
     fontSize: "15px"
   } as React.CSSProperties,
   topActions: {
@@ -146,6 +159,24 @@ const styles = {
     textDecoration: "none",
     display: "inline-flex",
     alignItems: "center"
+  } as React.CSSProperties,
+  buttonSoft: {
+    background: "#111827",
+    color: "#fff",
+    border: "none",
+    borderRadius: "10px",
+    padding: "10px 12px",
+    fontWeight: 700,
+    cursor: "pointer"
+  } as React.CSSProperties,
+  buttonMuted: {
+    background: "#fff",
+    color: "#111827",
+    border: "1px solid #d1d5db",
+    borderRadius: "10px",
+    padding: "10px 12px",
+    fontWeight: 700,
+    cursor: "pointer"
   } as React.CSSProperties,
   surface: {
     background: "#fff",
@@ -298,7 +329,7 @@ const styles = {
   } as React.CSSProperties,
   businessGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
     gap: "16px"
   } as React.CSSProperties,
   businessCard: {
@@ -379,6 +410,22 @@ const styles = {
     background: "#f9fafb",
     border: "1px dashed #d1d5db",
     color: "#6b7280"
+  } as React.CSSProperties,
+  rowButtons: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    marginTop: "14px"
+  } as React.CSSProperties,
+  textarea: {
+    width: "100%",
+    minHeight: "76px",
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    padding: "10px 12px",
+    outline: "none",
+    resize: "vertical",
+    fontFamily: "inherit"
   } as React.CSSProperties
 };
 
@@ -392,8 +439,10 @@ function scoreTone(score: number) {
   return { background: "#fee2e2", color: "#b91c1c" };
 }
 
-function formatLocationCount(value: number) {
-  return `${value} ${value === 1 ? "perfil" : "perfis"}`;
+function opportunityTone(level: "baixa" | "media" | "alta") {
+  if (level === "alta") return styles.chipDanger;
+  if (level === "media") return styles.chipWarn;
+  return styles.chipSuccess;
 }
 
 function compactText(value?: string | null) {
@@ -418,7 +467,9 @@ function App() {
   const [businessesError, setBusinessesError] = React.useState<string | null>(null);
 
   const [selectedAccountId, setSelectedAccountId] = React.useState<string>("all");
+  const [selectedPortfolioType, setSelectedPortfolioType] = React.useState<string>("all");
   const [search, setSearch] = React.useState("");
+  const [busyBusinessId, setBusyBusinessId] = React.useState<number | null>(null);
 
   async function loadMe() {
     const res = await fetch("/api/auth/me", {
@@ -459,15 +510,22 @@ function App() {
     }
   }
 
-  async function loadBusinesses(accountId?: string) {
+  async function loadBusinesses(accountId?: string, portfolioType?: string) {
     setBusinessesLoading(true);
     setBusinessesError(null);
 
     try {
-      const query =
-        accountId && accountId !== "all"
-          ? `?accountId=${encodeURIComponent(accountId)}`
-          : "";
+      const params = new URLSearchParams();
+
+      if (accountId && accountId !== "all") {
+        params.set("accountId", accountId);
+      }
+
+      if (portfolioType && portfolioType !== "all") {
+        params.set("portfolioType", portfolioType);
+      }
+
+      const query = params.toString() ? `?${params.toString()}` : "";
 
       const res = await fetch(`/api/gbp/businesses${query}`, {
         credentials: "include"
@@ -502,8 +560,8 @@ function App() {
     if (!authenticated || !user?.googleBusinessConnected) return;
 
     loadAccounts();
-    loadBusinesses(selectedAccountId);
-  }, [authenticated, user?.googleBusinessConnected, selectedAccountId]);
+    loadBusinesses(selectedAccountId, selectedPortfolioType);
+  }, [authenticated, user?.googleBusinessConnected, selectedAccountId, selectedPortfolioType]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", {
@@ -532,11 +590,66 @@ function App() {
 
       setImportResult(data.result);
       await loadAccounts();
-      await loadBusinesses(selectedAccountId);
+      await loadBusinesses(selectedAccountId, selectedPortfolioType);
     } catch (error: any) {
       setImportError(error?.message || "Erro ao importar contas");
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleClassification(
+    businessId: number,
+    portfolioType: string,
+    currentNotes?: string | null
+  ) {
+    setBusyBusinessId(businessId);
+
+    try {
+      const res = await fetch(`/api/gbp/businesses/${businessId}/classification`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          portfolioType,
+          notes: currentNotes ?? null
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Erro ao classificar perfil");
+      }
+
+      await loadBusinesses(selectedAccountId, selectedPortfolioType);
+    } catch (error: any) {
+      alert(error?.message || "Erro ao classificar perfil");
+    } finally {
+      setBusyBusinessId(null);
+    }
+  }
+
+  async function handleAiAnalysis(businessId: number) {
+    setBusyBusinessId(businessId);
+
+    try {
+      const res = await fetch(`/api/gbp/businesses/${businessId}/ai-analysis`, {
+        method: "POST",
+        credentials: "include"
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Erro ao gerar análise com IA");
+      }
+
+      await loadBusinesses(selectedAccountId, selectedPortfolioType);
+    } catch (error: any) {
+      alert(error?.message || "Erro ao gerar análise com IA");
+    } finally {
+      setBusyBusinessId(null);
     }
   }
 
@@ -551,7 +664,8 @@ function App() {
         business.city,
         business.state,
         business.account?.accountDisplayName,
-        business.account?.accountId
+        business.account?.accountId,
+        business.portfolioType
       ]
         .filter(Boolean)
         .join(" ")
@@ -571,12 +685,14 @@ function App() {
           )
         : 0;
     const criticalProfiles = businesses.filter((b) => b.score < 50).length;
+    const highOpportunity = businesses.filter((b) => b.opportunityLevel === "alta").length;
 
     return {
       totalProfiles,
       verifiedProfiles,
       averageScore,
-      criticalProfiles
+      criticalProfiles,
+      highOpportunity
     };
   }, [businesses]);
 
@@ -606,7 +722,7 @@ function App() {
             <div>
               <h1 style={styles.title}>GBP Analyzer</h1>
               <p style={styles.subtitle}>
-                Painel de contas, perfis e diagnóstico inicial para Google Business Profile.
+                Diagnóstico, classificação e oportunidade comercial para Google Business Profile.
               </p>
             </div>
 
@@ -632,25 +748,25 @@ function App() {
           <div style={styles.statCard}>
             <div style={styles.statLabel}>Perfis carregados</div>
             <p style={styles.statValue}>{stats.totalProfiles}</p>
-            <div style={styles.statSub}>base atual disponível para análise</div>
+            <div style={styles.statSub}>base pronta para análise e prospecção</div>
           </div>
 
           <div style={styles.statCard}>
             <div style={styles.statLabel}>Contas importadas</div>
             <p style={styles.statValue}>{accounts.length}</p>
-            <div style={styles.statSub}>entre pessoais e grupos</div>
+            <div style={styles.statSub}>pessoais e grupos acessíveis</div>
           </div>
 
           <div style={styles.statCard}>
             <div style={styles.statLabel}>Score médio</div>
             <p style={styles.statValue}>{stats.averageScore}/100</p>
-            <div style={styles.statSub}>visão rápida da saúde dos perfis</div>
+            <div style={styles.statSub}>força estrutural média da carteira</div>
           </div>
 
           <div style={styles.statCard}>
-            <div style={styles.statLabel}>Perfis críticos</div>
-            <p style={styles.statValue}>{stats.criticalProfiles}</p>
-            <div style={styles.statSub}>score abaixo de 50</div>
+            <div style={styles.statLabel}>Oportunidades altas</div>
+            <p style={styles.statValue}>{stats.highOpportunity}</p>
+            <div style={styles.statSub}>leads ou perfis com potencial claro</div>
           </div>
         </div>
 
@@ -689,26 +805,6 @@ function App() {
             </div>
           </div>
 
-          <div style={{ marginTop: 16 }}>
-            <details style={styles.details}>
-              <summary style={styles.summary}>Ver dados da sessão</summary>
-              <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>
-                {JSON.stringify(user, null, 2)}
-              </pre>
-            </details>
-          </div>
-
-          {importResult && (
-            <div style={{ marginTop: 16 }}>
-              <details style={styles.details} open>
-                <summary style={styles.summary}>Última importação</summary>
-                <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>
-                  {JSON.stringify(importResult, null, 2)}
-                </pre>
-              </details>
-            </div>
-          )}
-
           {importError && (
             <div style={{ marginTop: 16, color: "#b91c1c", fontWeight: 700 }}>
               Erro: {importError}
@@ -720,14 +816,14 @@ function App() {
           <div style={styles.sectionTitleRow}>
             <div>
               <h2 style={styles.sectionTitle}>Contas importadas</h2>
-              <p style={styles.sectionHint}>Use o filtro para focar em um grupo específico</p>
+              <p style={styles.sectionHint}>Use os filtros para enxergar melhor sua carteira</p>
             </div>
 
             <div style={styles.controlsRow}>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar perfil por nome, categoria ou cidade"
+                placeholder="Buscar por nome, categoria, cidade ou conta"
                 style={styles.input}
               />
 
@@ -743,6 +839,18 @@ function App() {
                       ` (${account.locationsCount})`}
                   </option>
                 ))}
+              </select>
+
+              <select
+                value={selectedPortfolioType}
+                onChange={(e) => setSelectedPortfolioType(e.target.value)}
+                style={styles.select}
+              >
+                <option value="all">Todas as classificações</option>
+                <option value="client">Clientes</option>
+                <option value="prospect">Prospects</option>
+                <option value="ignore">Ignorar</option>
+                <option value="unclassified">Sem classificação</option>
               </select>
             </div>
           </div>
@@ -764,7 +872,7 @@ function App() {
                   <div style={styles.chipRow}>
                     <span style={styles.chip}>{account.accountType || "N/A"}</span>
                     <span style={styles.chipSuccess}>
-                      {formatLocationCount(account.locationsCount)}
+                      {account.locationsCount} perfil(is)
                     </span>
                   </div>
 
@@ -807,6 +915,28 @@ function App() {
                         <div style={{ color: "#6b7280", marginTop: 6, fontSize: 14 }}>
                           {compactText(business.primaryCategory)}
                         </div>
+
+                        <div style={styles.chipRow}>
+                          <span style={styles.chip}>
+                            {business.portfolioType === "client"
+                              ? "Cliente"
+                              : business.portfolioType === "prospect"
+                              ? "Prospect"
+                              : business.portfolioType === "ignore"
+                              ? "Ignorar"
+                              : "Sem classificação"}
+                          </span>
+
+                          <span style={opportunityTone(business.opportunityLevel)}>
+                            Oportunidade {business.opportunityLevel}
+                          </span>
+
+                          {business.location?.isVerified ? (
+                            <span style={styles.chipSuccess}>Verificado</span>
+                          ) : (
+                            <span style={styles.chipDanger}>Não verificado</span>
+                          )}
+                        </div>
                       </div>
 
                       <div
@@ -829,18 +959,13 @@ function App() {
                       </div>
 
                       <div style={styles.metaItem}>
-                        <span style={styles.metaLabel}>Tipo</span>
+                        <span style={styles.metaLabel}>Tipo da conta</span>
                         {compactText(business.account?.accountType)}
                       </div>
 
                       <div style={styles.metaItem}>
                         <span style={styles.metaLabel}>Cidade / UF</span>
                         {compactText([business.city, business.state].filter(Boolean).join(" / "))}
-                      </div>
-
-                      <div style={styles.metaItem}>
-                        <span style={styles.metaLabel}>Verificação</span>
-                        {business.location?.isVerified ? "Verificado" : "Não verificado"}
                       </div>
 
                       <div style={styles.metaItem}>
@@ -863,6 +988,11 @@ function App() {
                           "N/A"
                         )}
                       </div>
+
+                      <div style={styles.metaItem}>
+                        <span style={styles.metaLabel}>Location ID</span>
+                        {compactText(business.location?.locationId)}
+                      </div>
                     </div>
 
                     <div style={styles.insightList}>
@@ -877,39 +1007,88 @@ function App() {
                       )}
                     </div>
 
-                    <details style={styles.details}>
-                      <summary style={styles.summary}>Ver detalhes do perfil</summary>
+                    <div style={styles.rowButtons}>
+                      <button
+                        style={styles.buttonMuted}
+                        disabled={busyBusinessId === business.id}
+                        onClick={() =>
+                          handleClassification(business.id, "client", business.notes)
+                        }
+                      >
+                        Marcar cliente
+                      </button>
 
-                      <div style={{ marginTop: 12 }}>
-                        <div style={styles.metaGrid}>
-                          <div style={styles.metaItem}>
-                            <span style={styles.metaLabel}>Location ID</span>
-                            {compactText(business.location?.locationId)}
-                          </div>
+                      <button
+                        style={styles.buttonMuted}
+                        disabled={busyBusinessId === business.id}
+                        onClick={() =>
+                          handleClassification(business.id, "prospect", business.notes)
+                        }
+                      >
+                        Marcar prospect
+                      </button>
 
-                          <div style={styles.metaItem}>
-                            <span style={styles.metaLabel}>Status verificação</span>
-                            {compactText(business.location?.verificationState)}
-                          </div>
+                      <button
+                        style={styles.buttonMuted}
+                        disabled={busyBusinessId === business.id}
+                        onClick={() =>
+                          handleClassification(business.id, "ignore", business.notes)
+                        }
+                      >
+                        Ignorar
+                      </button>
 
-                          <div style={styles.metaItem}>
-                            <span style={styles.metaLabel}>Fonte</span>
-                            {compactText(business.source)}
-                          </div>
+                      <button
+                        style={styles.buttonSoft}
+                        disabled={busyBusinessId === business.id}
+                        onClick={() => handleAiAnalysis(business.id)}
+                      >
+                        {busyBusinessId === business.id ? "Gerando..." : "Gerar análise IA"}
+                      </button>
+                    </div>
 
-                          <div style={styles.metaItem}>
-                            <span style={styles.metaLabel}>Status</span>
-                            {compactText(business.status)}
-                          </div>
+                    {business.aiSummaryJson ? (
+                      <div style={{ marginTop: 16, background: "#f8fafc", borderRadius: 12, padding: 14 }}>
+                        <div style={{ fontWeight: 800, marginBottom: 8 }}>Análise com IA</div>
+
+                        <div style={{ marginBottom: 10 }}>
+                          <span style={styles.metaLabel}>Resumo</span>
+                          <div>{business.aiSummaryJson.summary || "N/A"}</div>
                         </div>
 
-                        <div style={{ marginTop: 14 }}>
-                          <span style={styles.metaLabel}>Composição do score</span>
-                          <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
-                            {JSON.stringify(business.breakdown, null, 2)}
-                          </pre>
+                        <div style={{ marginBottom: 10 }}>
+                          <span style={styles.metaLabel}>Diagnóstico de ranqueamento</span>
+                          <div>{business.aiSummaryJson.rankingDiagnosis || "N/A"}</div>
                         </div>
+
+                        <div style={{ marginBottom: 10 }}>
+                          <span style={styles.metaLabel}>Oportunidade comercial</span>
+                          <div>{business.aiSummaryJson.opportunityAnalysis || "N/A"}</div>
+                        </div>
+
+                        <div style={{ marginBottom: 10 }}>
+                          <span style={styles.metaLabel}>Prioridades</span>
+                          <ul style={{ margin: "8px 0 0 18px" }}>
+                            {(business.aiSummaryJson.priorities || []).map((item, idx) => (
+                              <li key={idx}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <details style={{ ...styles.details, marginTop: 10 }}>
+                          <summary style={styles.summary}>Ver pitch comercial sugerido</summary>
+                          <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
+                            {business.aiSummaryJson.pitch || "N/A"}
+                          </div>
+                        </details>
                       </div>
+                    ) : null}
+
+                    <details style={styles.details}>
+                      <summary style={styles.summary}>Ver composição do score</summary>
+                      <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
+                        {JSON.stringify(business.breakdown, null, 2)}
+                      </pre>
                     </details>
                   </div>
                 );
