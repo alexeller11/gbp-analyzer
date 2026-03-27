@@ -83,6 +83,10 @@ export const businesses = pgTable(
     phone: text("phone"),
     website: text("website"),
     googleLocationKey: text("google_location_key").notNull(),
+    portfolioType: text("portfolio_type").default("unclassified").notNull(),
+    notes: text("notes"),
+    aiSummaryJson: jsonb("ai_summary_json"),
+    lastAiAnalysisAt: timestamp("last_ai_analysis_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull()
   },
