@@ -3,6 +3,7 @@ import { SignJWT, jwtVerify } from "jose";
 
 export type SessionUser = {
   id: string;
+  googleOpenId?: string;
   email: string;
   name?: string;
   picture?: string;
@@ -21,6 +22,7 @@ function getJwtSecret() {
 export async function createSessionToken(user: SessionUser) {
   return new SignJWT({
     sub: user.id,
+    googleOpenId: user.googleOpenId,
     email: user.email,
     name: user.name,
     picture: user.picture,
@@ -38,6 +40,7 @@ export async function verifySessionToken(token: string) {
 
   return {
     id: String(payload.sub || ""),
+    googleOpenId: payload.googleOpenId ? String(payload.googleOpenId) : undefined,
     email: String(payload.email || ""),
     name: payload.name ? String(payload.name) : undefined,
     picture: payload.picture ? String(payload.picture) : undefined,
