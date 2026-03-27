@@ -86,7 +86,11 @@ export function calculateGbpScore(
     priorities.push("Revisar localização e consistência geográfica");
   }
 
-  if (business.location?.isVerified) {
+  const isVerified =
+  business.location?.isVerified ||
+  business.location?.verificationState === "VERIFIED";
+
+if (isVerified) {
     breakdown.verification = 30;
     score += breakdown.verification;
   } else {
