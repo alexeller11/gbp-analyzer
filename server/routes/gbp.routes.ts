@@ -3,6 +3,7 @@ import { eq, asc, desc } from "drizzle-orm";
 import { verifySessionToken } from "../auth/session";
 import { importGoogleBusinessPortfolio } from "../services/google-import.service";
 import { calculateGbpScore } from "../services/gbp-score.service";
+import { generateAiAnalysis } from "../services/ai-insights.service";
 import { db } from "../db";
 import { gbpAccounts, gbpLocations, businesses } from "../../drizzle/schema";
 
@@ -93,6 +94,8 @@ router.get("/api/gbp/businesses", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
     const accountId = typeof req.query.accountId === "string" ? req.query.accountId : null;
+    const portfolioType =
+      typeof req.query.portfolioType === "string" ? req.query.portfolioType : null;
 
     const allBusinesses = await db.query.businesses.findMany({
       where: eq(businesses.userId, userId),
@@ -129,6 +132,7 @@ router.get("/api/gbp/businesses", async (req, res) => {
           state: business.state,
           phone: business.phone,
           website: business.website,
+          portfolioType: business.portfolioType,
           location: location
             ? {
                 isVerified: location.isVerified,
@@ -148,10 +152,17 @@ router.get("/api/gbp/businesses", async (req, res) => {
           status: business.status,
           source: business.source,
           googleLocationKey: business.googleLocationKey,
+          portfolioType: business.portfolioType,
+          notes: business.notes,
+          aiSummaryJson: business.aiSummaryJson,
+          lastAiAnalysisAt: business.lastAiAnalysisAt,
           createdAt: business.createdAt,
           updatedAt: business.updatedAt,
           score: scoreData.score,
+          opportunityScore: scoreData.opportunityScore,
+          opportunityLevel: scoreData.opportunityLevel,
           insights: scoreData.insights,
+          priorities: scoreData.priorities,
           breakdown: scoreData.breakdown,
           location: location
             ? {
@@ -179,9 +190,19 @@ router.get("/api/gbp/businesses", async (req, res) => {
         };
       })
       .filter((row) => {
-        if (!accountId) return true;
-        if (accountId === "all") return true;
-        return row.account?.accountId === accountId;
+        if (accountId && accountId !== "all" && row.account?.accountId !== accountId) {
+          return false;
+        }
+
+        if (
+          portfolioType &&
+          portfolioType !== "all" &&
+          row.portfolioType !== portfolioType
+        ) {
+          return false;
+        }
+
+        return true;
       });
 
     return res.status(200).json({
@@ -194,6 +215,140 @@ router.get("/api/gbp/businesses", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message || "Erro ao listar negócios GBP"
+    });
+  }
+});
+
+router.patch("/api/gbp/businesses/:id/classification", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const businessId = Number(req.params.id);
+    const portfolioType = String(req.body?.portfolioType || "unclassified");
+    const notes = req.body?.notes ? String(req.body.notes) : null;
+
+    const allowed = ["client", "prospect", "ignore", "unclassified"];
+    if (!allowed.includes(portfolioType)) {
+      return res.status(400).json({
+        ok: false,
+        error: "portfolioType inválido"
+      });
+    }
+
+    const target = await db.query.businesses.findFirst({
+      where: eq(businesses.id, businessId)
+    });
+
+    if (!target || target.userId !== userId) {
+      return res.status(404).json({
+        ok: false,
+        error: "Perfil não encontrado"
+      });
+    }
+
+    const [updated] = await db
+      .update(businesses)
+      .set({
+        portfolioType,
+        notes,
+        updatedAt: new Date()
+      })
+      .where(eq(businesses.id, businessId))
+      .returning();
+
+    return res.status(200).json({
+      ok: true,
+      business: updated
+    });
+  } catch (error: any) {
+    console.error("Erro ao classificar perfil:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao classificar perfil"
+    });
+  }
+});
+
+router.post("/api/gbp/businesses/:id/ai-analysis", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const businessId = Number(req.params.id);
+
+    const business = await db.query.businesses.findFirst({
+      where: eq(businesses.id, businessId)
+    });
+
+    if (!business || business.userId !== userId) {
+      return res.status(404).json({
+        ok: false,
+        error: "Perfil não encontrado"
+      });
+    }
+
+    const location = await db.query.gbpLocations.findFirst({
+      where: eq(gbpLocations.businessId, business.id)
+    });
+
+    const account = location
+      ? await db.query.gbpAccounts.findFirst({
+          where: eq(gbpAccounts.id, location.gbpAccountId)
+        })
+      : null;
+
+    const scoreData = calculateGbpScore({
+      name: business.name,
+      primaryCategory: business.primaryCategory,
+      city: business.city,
+      state: business.state,
+      phone: business.phone,
+      website: business.website,
+      portfolioType: business.portfolioType,
+      location: location
+        ? {
+            isVerified: location.isVerified,
+            verificationState: location.verificationState
+          }
+        : null
+    });
+
+    const aiResult = await generateAiAnalysis({
+      name: business.name,
+      primaryCategory: business.primaryCategory,
+      city: business.city,
+      state: business.state,
+      phone: business.phone,
+      website: business.website,
+      accountName: account?.accountDisplayName ?? null,
+      accountType: account?.accountType ?? null,
+      score: scoreData.score,
+      opportunityScore: scoreData.opportunityScore,
+      opportunityLevel: scoreData.opportunityLevel,
+      insights: scoreData.insights,
+      priorities: scoreData.priorities,
+      isVerified: location?.isVerified ?? false,
+      verificationState: location?.verificationState ?? null,
+      portfolioType: business.portfolioType
+    });
+
+    const [updated] = await db
+      .update(businesses)
+      .set({
+        aiSummaryJson: aiResult,
+        lastAiAnalysisAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(businesses.id, business.id))
+      .returning();
+
+    return res.status(200).json({
+      ok: true,
+      ai: updated.aiSummaryJson,
+      lastAiAnalysisAt: updated.lastAiAnalysisAt
+    });
+  } catch (error: any) {
+    console.error("Erro ao gerar análise com IA:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao gerar análise com IA"
     });
   }
 });
