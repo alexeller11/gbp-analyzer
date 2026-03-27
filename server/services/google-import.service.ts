@@ -7,7 +7,7 @@ import {
 } from "../../drizzle/schema";
 import { getValidGoogleAccessToken } from "./google-connection.service";
 import {
-  listAccounts,
+  discoverAllAccounts,
   listLocations,
   parseAccountId,
   parseLocationId
@@ -20,15 +20,17 @@ export async function importGoogleBusinessPortfolio(userId: number) {
     throw new Error("Google Business Profile ainda não está conectado");
   }
 
-  const accounts = await listAccounts(accessToken);
+  const accounts = await discoverAllAccounts(accessToken);
 
   const result = {
     accountsImported: 0,
     locationsImported: 0,
     businessesImported: 0,
+    accountsDiscovered: accounts.length,
     accounts: [] as Array<{
       accountId: string;
       accountName: string | null;
+      type: string | null;
       locations: number;
     }>
   };
@@ -76,6 +78,7 @@ export async function importGoogleBusinessPortfolio(userId: number) {
     result.accounts.push({
       accountId,
       accountName: account.accountName ?? null,
+      type: account.type ?? null,
       locations: locations.length
     });
 
