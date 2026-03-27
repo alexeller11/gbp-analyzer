@@ -1,3 +1,4 @@
+import { calculateGbpScore } from "../services/gbp-score.service";
 import { Router } from "express";
 import { eq, asc, desc } from "drizzle-orm";
 import { verifySessionToken } from "../auth/session";
