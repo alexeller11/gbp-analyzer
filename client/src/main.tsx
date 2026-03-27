@@ -51,6 +51,17 @@ type BusinessRow = {
   googleLocationKey: string;
   createdAt: string;
   updatedAt: string;
+  score: number;
+  insights: string[];
+  breakdown: {
+    name: number;
+    category: number;
+    phone: number;
+    website: number;
+    city: number;
+    verification: number;
+    consistencyBonus: number;
+  };
   location: {
     id: number;
     googleLocationName: string;
@@ -91,6 +102,12 @@ function buttonStyle(disabled = false): React.CSSProperties {
     color: disabled ? "#6b7280" : "#fff",
     cursor: disabled ? "not-allowed" : "pointer"
   };
+}
+
+function scoreColor(score: number) {
+  if (score >= 80) return "#166534";
+  if (score >= 60) return "#92400e";
+  return "#b91c1c";
 }
 
 function App() {
@@ -376,8 +393,19 @@ function App() {
           <div style={{ display: "grid", gap: 12 }}>
             {businesses.map((business) => (
               <div key={business.id} style={{ ...cardStyle(), marginTop: 0 }}>
-                <div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
                   <strong>{business.name}</strong>
+                  <div
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 999,
+                      fontWeight: 700,
+                      background: "#f3f4f6",
+                      color: scoreColor(business.score)
+                    }}
+                  >
+                    Score: {business.score}/100
+                  </div>
                 </div>
 
                 <div style={{ marginTop: 8 }}>
@@ -396,6 +424,28 @@ function App() {
                 <div>Location ID: {business.location?.locationId || "N/A"}</div>
                 <div>Verificado: {business.location?.isVerified ? "Sim" : "Não"}</div>
                 <div>Status de verificação: {business.location?.verificationState || "N/A"}</div>
+
+                <div style={{ marginTop: 12 }}>
+                  <strong>Diagnóstico inicial:</strong>
+                  {business.insights?.length > 0 ? (
+                    <ul style={{ marginTop: 8 }}>
+                      {business.insights.map((insight, index) => (
+                        <li key={index}>{insight}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p style={{ marginTop: 8 }}>Nenhum alerta inicial encontrado.</p>
+                  )}
+                </div>
+
+                <details style={{ marginTop: 12 }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                    Ver composição do score
+                  </summary>
+                  <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
+                    {JSON.stringify(business.breakdown, null, 2)}
+                  </pre>
+                </details>
               </div>
             ))}
           </div>
