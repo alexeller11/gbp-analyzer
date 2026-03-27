@@ -18,36 +18,169 @@ type ImportResult = {
   accountsImported: number;
   locationsImported: number;
   businessesImported: number;
+  accountsDiscovered: number;
   accounts: Array<{
     accountId: string;
     accountName: string | null;
+    type: string | null;
     locations: number;
   }>;
 };
+
+type AccountRow = {
+  id: number;
+  googleAccountName: string;
+  accountId: string;
+  accountDisplayName: string | null;
+  accountType: string | null;
+  locationsCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type BusinessRow = {
+  id: number;
+  name: string;
+  primaryCategory: string | null;
+  city: string | null;
+  state: string | null;
+  phone: string | null;
+  website: string | null;
+  status: string;
+  source: string;
+  googleLocationKey: string;
+  createdAt: string;
+  updatedAt: string;
+  location: {
+    id: number;
+    googleLocationName: string;
+    locationId: string;
+    title: string;
+    storeCode: string | null;
+    languageCode: string | null;
+    verificationState: string | null;
+    isVerified: boolean;
+    lastImportedAt: string | null;
+    lastSyncedAt: string | null;
+  } | null;
+  account: {
+    id: number;
+    accountId: string;
+    accountDisplayName: string | null;
+    accountType: string | null;
+    googleAccountName: string;
+  } | null;
+};
+
+function cardStyle(): React.CSSProperties {
+  return {
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    background: "#fff"
+  };
+}
+
+function buttonStyle(disabled = false): React.CSSProperties {
+  return {
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: "1px solid #d1d5db",
+    background: disabled ? "#f3f4f6" : "#111827",
+    color: disabled ? "#6b7280" : "#fff",
+    cursor: disabled ? "not-allowed" : "pointer"
+  };
+}
 
 function App() {
   const [loading, setLoading] = React.useState(true);
   const [authenticated, setAuthenticated] = React.useState(false);
   const [user, setUser] = React.useState<MeResponse["user"] | null>(null);
+
   const [importing, setImporting] = React.useState(false);
   const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
   const [importError, setImportError] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
-    fetch("/api/auth/me", {
-      credentials: "include"
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          setAuthenticated(false);
-          setUser(null);
-          return;
-        }
+  const [accounts, setAccounts] = React.useState<AccountRow[]>([]);
+  const [accountsLoading, setAccountsLoading] = React.useState(false);
+  const [accountsError, setAccountsError] = React.useState<string | null>(null);
 
-        const data: MeResponse = await res.json();
-        setAuthenticated(Boolean(data.authenticated));
-        setUser(data.user ?? null);
-      })
+  const [businesses, setBusinesses] = React.useState<BusinessRow[]>([]);
+  const [businessesLoading, setBusinessesLoading] = React.useState(false);
+  const [businessesError, setBusinessesError] = React.useState<string | null>(null);
+
+  const [selectedAccountId, setSelectedAccountId] = React.useState<string>("all");
+
+  async function loadMe() {
+    const res = await fetch("/api/auth/me", {
+      credentials: "include"
+    });
+
+    if (!res.ok) {
+      setAuthenticated(false);
+      setUser(null);
+      return;
+    }
+
+    const data: MeResponse = await res.json();
+    setAuthenticated(Boolean(data.authenticated));
+    setUser(data.user ?? null);
+  }
+
+  async function loadAccounts() {
+    setAccountsLoading(true);
+    setAccountsError(null);
+
+    try {
+      const res = await fetch("/api/gbp/accounts", {
+        credentials: "include"
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Erro ao carregar contas");
+      }
+
+      setAccounts(data.accounts ?? []);
+    } catch (error: any) {
+      setAccountsError(error?.message || "Erro ao carregar contas");
+    } finally {
+      setAccountsLoading(false);
+    }
+  }
+
+  async function loadBusinesses(accountId?: string) {
+    setBusinessesLoading(true);
+    setBusinessesError(null);
+
+    try {
+      const query =
+        accountId && accountId !== "all"
+          ? `?accountId=${encodeURIComponent(accountId)}`
+          : "";
+
+      const res = await fetch(`/api/gbp/businesses${query}`, {
+        credentials: "include"
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Erro ao carregar perfis");
+      }
+
+      setBusinesses(data.businesses ?? []);
+    } catch (error: any) {
+      setBusinessesError(error?.message || "Erro ao carregar perfis");
+    } finally {
+      setBusinessesLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    loadMe()
       .catch(() => {
         setAuthenticated(false);
         setUser(null);
@@ -56,6 +189,13 @@ function App() {
         setLoading(false);
       });
   }, []);
+
+  React.useEffect(() => {
+    if (!authenticated || !user?.googleBusinessConnected) return;
+
+    loadAccounts();
+    loadBusinesses(selectedAccountId);
+  }, [authenticated, user?.googleBusinessConnected, selectedAccountId]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", {
@@ -83,6 +223,8 @@ function App() {
       }
 
       setImportResult(data.result);
+      await loadAccounts();
+      await loadBusinesses(selectedAccountId);
     } catch (error: any) {
       setImportError(error?.message || "Erro ao importar contas");
     } finally {
@@ -109,57 +251,161 @@ function App() {
   }
 
   return (
-    <div style={{ padding: 32, fontFamily: "Arial, sans-serif" }}>
-      <h1>GBP Analyzer</h1>
-      <p>Login realizado com sucesso.</p>
+    <div
+      style={{
+        padding: 32,
+        fontFamily: "Arial, sans-serif",
+        background: "#f9fafb",
+        minHeight: "100vh",
+        color: "#111827"
+      }}
+    >
+      <h1 style={{ marginBottom: 8 }}>GBP Analyzer</h1>
+      <p style={{ marginTop: 0 }}>Login realizado com sucesso.</p>
 
-      <pre>{JSON.stringify(user, null, 2)}</pre>
-
-      <div style={{ marginTop: 16 }}>
-        <strong>Status do Google Business Profile:</strong>{" "}
-        {user?.googleBusinessConnected ? "Conectado" : "Não conectado"}
+      <div style={cardStyle()}>
+        <h2 style={{ marginTop: 0 }}>Usuário autenticado</h2>
+        <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(user, null, 2)}</pre>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        {user?.googleBusinessConnected ? (
-          <button disabled style={{ opacity: 0.7, cursor: "not-allowed" }}>
-            Google Business Profile conectado
-          </button>
+      <div style={cardStyle()}>
+        <div>
+          <strong>Status do Google Business Profile:</strong>{" "}
+          {user?.googleBusinessConnected ? "Conectado" : "Não conectado"}
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          {user?.googleBusinessConnected ? (
+            <button disabled style={buttonStyle(true)}>
+              Google Business Profile conectado
+            </button>
+          ) : (
+            <a href="/api/auth/google-business-connect">
+              Conectar Google Business Profile
+            </a>
+          )}
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <strong>Escopos concedidos:</strong>
+          <pre style={{ whiteSpace: "pre-wrap" }}>
+            {JSON.stringify(user?.scopes ?? [], null, 2)}
+          </pre>
+        </div>
+
+        {user?.googleBusinessConnected && (
+          <div style={{ marginTop: 16 }}>
+            <button onClick={handleImportPortfolio} disabled={importing} style={buttonStyle(importing)}>
+              {importing ? "Importando..." : "Importar meus perfis do Google Business"}
+            </button>
+          </div>
+        )}
+
+        {importError && (
+          <div style={{ marginTop: 16, color: "crimson" }}>
+            <strong>Erro:</strong> {importError}
+          </div>
+        )}
+
+        {importResult && (
+          <div style={{ marginTop: 16 }}>
+            <h3>Última importação</h3>
+            <pre style={{ whiteSpace: "pre-wrap" }}>
+              {JSON.stringify(importResult, null, 2)}
+            </pre>
+          </div>
+        )}
+      </div>
+
+      <div style={cardStyle()}>
+        <h2 style={{ marginTop: 0 }}>Contas importadas</h2>
+
+        {accountsLoading ? (
+          <p>Carregando contas...</p>
+        ) : accountsError ? (
+          <p style={{ color: "crimson" }}>{accountsError}</p>
+        ) : accounts.length === 0 ? (
+          <p>Nenhuma conta importada ainda.</p>
         ) : (
-          <a href="/api/auth/google-business-connect">
-            Conectar Google Business Profile
-          </a>
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <label>
+                Filtrar por conta:{" "}
+                <select
+                  value={selectedAccountId}
+                  onChange={(e) => setSelectedAccountId(e.target.value)}
+                  style={{ padding: 8, borderRadius: 8 }}
+                >
+                  <option value="all">Todas</option>
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.accountId}>
+                      {(account.accountDisplayName || account.accountId) +
+                        ` (${account.locationsCount})`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div style={{ display: "grid", gap: 12 }}>
+              {accounts.map((account) => (
+                <div key={account.id} style={{ ...cardStyle(), marginTop: 0 }}>
+                  <div>
+                    <strong>{account.accountDisplayName || account.accountId}</strong>
+                  </div>
+                  <div>Tipo: {account.accountType || "N/A"}</div>
+                  <div>Account ID: {account.accountId}</div>
+                  <div>Locations importadas: {account.locationsCount}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={cardStyle()}>
+        <h2 style={{ marginTop: 0 }}>Perfis importados</h2>
+
+        {businessesLoading ? (
+          <p>Carregando perfis...</p>
+        ) : businessesError ? (
+          <p style={{ color: "crimson" }}>{businessesError}</p>
+        ) : businesses.length === 0 ? (
+          <p>Nenhum perfil encontrado para esse filtro.</p>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {businesses.map((business) => (
+              <div key={business.id} style={{ ...cardStyle(), marginTop: 0 }}>
+                <div>
+                  <strong>{business.name}</strong>
+                </div>
+
+                <div style={{ marginTop: 8 }}>
+                  Categoria: {business.primaryCategory || "N/A"}
+                </div>
+                <div>
+                  Cidade/UF: {[business.city, business.state].filter(Boolean).join(" / ") || "N/A"}
+                </div>
+                <div>Telefone: {business.phone || "N/A"}</div>
+                <div>Website: {business.website || "N/A"}</div>
+
+                <div style={{ marginTop: 8 }}>
+                  Conta: {business.account?.accountDisplayName || business.account?.accountId || "N/A"}
+                </div>
+                <div>Tipo da conta: {business.account?.accountType || "N/A"}</div>
+                <div>Location ID: {business.location?.locationId || "N/A"}</div>
+                <div>Verificado: {business.location?.isVerified ? "Sim" : "Não"}</div>
+                <div>Status de verificação: {business.location?.verificationState || "N/A"}</div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <strong>Escopos concedidos:</strong>
-        <pre>{JSON.stringify(user?.scopes ?? [], null, 2)}</pre>
-      </div>
-
-      {user?.googleBusinessConnected && (
-        <div style={{ marginTop: 24 }}>
-          <button onClick={handleImportPortfolio} disabled={importing}>
-            {importing ? "Importando..." : "Importar meus perfis do Google Business"}
-          </button>
-        </div>
-      )}
-
-      {importError && (
-        <div style={{ marginTop: 16, color: "crimson" }}>
-          <strong>Erro:</strong> {importError}
-        </div>
-      )}
-
-      {importResult && (
-        <div style={{ marginTop: 24 }}>
-          <h2>Importação concluída</h2>
-          <pre>{JSON.stringify(importResult, null, 2)}</pre>
-        </div>
-      )}
-
-      <div style={{ marginTop: 16 }}>
-        <button onClick={handleLogout}>Sair</button>
+        <button onClick={handleLogout} style={buttonStyle(false)}>
+          Sair
+        </button>
       </div>
     </div>
   );
