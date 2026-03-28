@@ -59,6 +59,7 @@ export const gbpAccounts = pgTable(
     accountId: text("account_id").notNull(),
     accountDisplayName: text("account_display_name"),
     accountType: text("account_type"),
+    accountVerificationState: text("account_verification_state"),
     rawJson: jsonb("raw_json"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull()
@@ -109,6 +110,9 @@ export const gbpLocations = pgTable(
     storeCode: text("store_code"),
     languageCode: text("language_code"),
     verificationState: text("verification_state"),
+    verificationStatus: text("verification_status").default("unknown").notNull(),
+    verificationMethod: text("verification_method"),
+    verificationSource: text("verification_source"),
     isVerified: boolean("is_verified").default(false).notNull(),
     metadataJson: jsonb("metadata_json"),
     profileJson: jsonb("profile_json"),
