@@ -270,6 +270,13 @@ router.patch("/api/gbp/businesses/:id/classification", async (req, res) => {
 
 router.post("/api/gbp/businesses/:id/ai-analysis", async (req, res) => {
   try {
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(400).json({
+        ok: false,
+        error: "GEMINI_API_KEY não configurada no Railway"
+      });
+    }
+
     const userId = await getAuthenticatedUserId(req);
     const businessId = Number(req.params.id);
 
@@ -324,7 +331,9 @@ router.post("/api/gbp/businesses/:id/ai-analysis", async (req, res) => {
       opportunityLevel: scoreData.opportunityLevel,
       insights: scoreData.insights,
       priorities: scoreData.priorities,
-      isVerified: location?.isVerified ?? false,
+      isVerified:
+        Boolean(location?.isVerified) ||
+        location?.verificationState === "VERIFIED",
       verificationState: location?.verificationState ?? null,
       portfolioType: business.portfolioType
     });
