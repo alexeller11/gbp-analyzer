@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import AccountDashboard from "./pages/account-dashboard";
 
 type MeResponse = {
   authenticated: boolean;
@@ -325,7 +326,9 @@ const styles = {
     border: "1px solid #e5e7eb",
     borderRadius: "16px",
     padding: "16px",
-    background: "#fafafa"
+    background: "#fafafa",
+    cursor: "pointer",
+    transition: "all 0.2s ease"
   } as React.CSSProperties,
   businessGrid: {
     display: "grid",
@@ -416,16 +419,6 @@ const styles = {
     gap: "8px",
     flexWrap: "wrap",
     marginTop: "14px"
-  } as React.CSSProperties,
-  textarea: {
-    width: "100%",
-    minHeight: "76px",
-    borderRadius: "10px",
-    border: "1px solid #d1d5db",
-    padding: "10px 12px",
-    outline: "none",
-    resize: "vertical",
-    fontFamily: "inherit"
   } as React.CSSProperties
 };
 
@@ -470,6 +463,7 @@ function App() {
   const [selectedPortfolioType, setSelectedPortfolioType] = React.useState<string>("all");
   const [search, setSearch] = React.useState("");
   const [busyBusinessId, setBusyBusinessId] = React.useState<number | null>(null);
+  const [activeAccount, setActiveAccount] = React.useState<AccountRow | null>(null);
 
   async function loadMe() {
     const res = await fetch("/api/auth/me", {
@@ -677,7 +671,9 @@ function App() {
 
   const stats = React.useMemo(() => {
     const totalProfiles = businesses.length;
-    const verifiedProfiles = businesses.filter((b) => b.location?.isVerified).length;
+    const verifiedProfiles = businesses.filter(
+      (b) => b.location?.isVerified || b.location?.verificationState === "VERIFIED"
+    ).length;
     const averageScore =
       businesses.length > 0
         ? Math.round(
@@ -695,6 +691,13 @@ function App() {
       highOpportunity
     };
   }, [businesses]);
+
+  const activeAccountBusinesses = React.useMemo(() => {
+    if (!activeAccount) return [];
+    return businesses.filter(
+      (b) => b.account?.accountId === activeAccount.accountId
+    );
+  }, [activeAccount, businesses]);
 
   if (loading) {
     return (
@@ -812,11 +815,21 @@ function App() {
           )}
         </div>
 
+        {activeAccount ? (
+          <div style={{ marginTop: 18 }}>
+            <AccountDashboard
+              account={activeAccount}
+              businesses={activeAccountBusinesses}
+              onBack={() => setActiveAccount(null)}
+            />
+          </div>
+        ) : null}
+
         <div style={{ ...styles.surface, ...styles.section, marginTop: 18 }}>
           <div style={styles.sectionTitleRow}>
             <div>
               <h2 style={styles.sectionTitle}>Contas importadas</h2>
-              <p style={styles.sectionHint}>Use os filtros para enxergar melhor sua carteira</p>
+              <p style={styles.sectionHint}>Clique numa conta para abrir o dashboard dela</p>
             </div>
 
             <div style={styles.controlsRow}>
@@ -864,7 +877,11 @@ function App() {
           ) : (
             <div style={styles.accountsGrid}>
               {accounts.map((account) => (
-                <div key={account.id} style={styles.accountCard}>
+                <div
+                  key={account.id}
+                  style={styles.accountCard}
+                  onClick={() => setActiveAccount(account)}
+                >
                   <div style={{ fontWeight: 800, fontSize: 16 }}>
                     {account.accountDisplayName || account.accountId}
                   </div>
@@ -931,7 +948,8 @@ function App() {
                             Oportunidade {business.opportunityLevel}
                           </span>
 
-                          {business.location?.isVerified ? (
+                          {business.location?.isVerified ||
+                          business.location?.verificationState === "VERIFIED" ? (
                             <span style={styles.chipSuccess}>Verificado</span>
                           ) : (
                             <span style={styles.chipDanger}>Não verificado</span>
