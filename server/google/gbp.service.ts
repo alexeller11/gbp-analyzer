@@ -6,10 +6,11 @@ export type GbpAccountType =
   | string;
 
 export type GbpAccount = {
-  name: string; // accounts/123
+  name: string;
   accountName?: string;
   type?: GbpAccountType;
   role?: string;
+  verificationState?: string;
 };
 
 export type GbpLocation = {
@@ -35,6 +36,13 @@ export type GbpLocation = {
   languageCode?: string;
   storeCode?: string;
   profile?: Record<string, unknown>;
+};
+
+export type GbpVerification = {
+  name: string;
+  method?: string;
+  state?: string;
+  createTime?: string;
 };
 
 function authHeaders(accessToken: string) {
@@ -96,10 +104,6 @@ export async function listAccounts(
   return allAccounts;
 }
 
-/**
- * Descobre todas as contas acessíveis ao usuário, inclusive contas filhas
- * dentro de ORGANIZATION e USER_GROUP.
- */
 export async function discoverAllAccounts(accessToken: string): Promise<GbpAccount[]> {
   const visited = new Set<string>();
   const queue: GbpAccount[] = await listAccounts(accessToken);
@@ -168,8 +172,6 @@ export async function listLocations(
     if (!response.ok) {
       const errorText = await response.text();
 
-      // Algumas contas "contêiner" ou tipos sem locations diretas podem retornar erro.
-      // Em vez de quebrar a importação inteira, devolvemos vazio nesses casos.
       if (
         errorText.includes("does not support this method") ||
         errorText.includes("INVALID_ARGUMENT") ||
@@ -188,4 +190,102 @@ export async function listLocations(
   } while (pageToken);
 
   return allLocations;
+}
+
+export async function listLocationVerifications(
+  accessToken: string,
+  locationId: string
+): Promise<GbpVerification[]> {
+  const response = await fetch(
+    `https://mybusinessverifications.googleapis.com/v1/locations/${locationId}/verifications`,
+    {
+      headers: authHeaders(accessToken)
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    if (
+      response.status === 404 ||
+      response.status === 403 ||
+      errorText.includes("SERVICE_DISABLED") ||
+      errorText.includes("has not been used in project") ||
+      errorText.includes("PERMISSION_DENIED")
+    ) {
+      return [];
+    }
+
+    throw new Error(`locations.verifications.list falhou para locationId=${locationId}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.verifications ?? [];
+}
+
+export function resolveVerificationFromApi(
+  verifications: GbpVerification[]
+): {
+  verificationStatus: "verified" | "pending" | "failed" | "unverified" | "unknown";
+  verificationState: string | null;
+  verificationMethod: string | null;
+  isVerified: boolean;
+  verificationSource: string;
+} {
+  if (!verifications.length) {
+    return {
+      verificationStatus: "unknown",
+      verificationState: null,
+      verificationMethod: null,
+      isVerified: false,
+      verificationSource: "verifications_api_empty"
+    };
+  }
+
+  const latest = [...verifications].sort((a, b) => {
+    const da = a.createTime ? new Date(a.createTime).getTime() : 0;
+    const db = b.createTime ? new Date(b.createTime).getTime() : 0;
+    return db - da;
+  })[0];
+
+  const state = latest?.state ?? null;
+  const method = latest?.method ?? null;
+
+  if (state === "COMPLETED") {
+    return {
+      verificationStatus: "verified",
+      verificationState: state,
+      verificationMethod: method,
+      isVerified: true,
+      verificationSource: "verifications_api"
+    };
+  }
+
+  if (state === "PENDING") {
+    return {
+      verificationStatus: "pending",
+      verificationState: state,
+      verificationMethod: method,
+      isVerified: false,
+      verificationSource: "verifications_api"
+    };
+  }
+
+  if (state === "FAILED") {
+    return {
+      verificationStatus: "failed",
+      verificationState: state,
+      verificationMethod: method,
+      isVerified: false,
+      verificationSource: "verifications_api"
+    };
+  }
+
+  return {
+    verificationStatus: "unknown",
+    verificationState: state,
+    verificationMethod: method,
+    isVerified: false,
+    verificationSource: "verifications_api"
+  };
 }
