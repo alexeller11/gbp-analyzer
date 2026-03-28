@@ -37,7 +37,7 @@ function getClient() {
 }
 
 function getModel() {
-  return process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+  return process.env.GEMINI_MODEL || "gemini-2.5-flash";
 }
 
 function extractJson(text: string) {
