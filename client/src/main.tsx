@@ -15,6 +15,13 @@ type MeResponse = {
   };
 };
 
+type SystemStatus = {
+  ok: boolean;
+  aiConfigured: boolean;
+  geminiModel: string | null;
+  nodeEnv: string | null;
+};
+
 type ImportResult = {
   accountsImported: number;
   locationsImported: number;
@@ -147,7 +154,10 @@ const styles = {
     padding: "12px 16px",
     fontWeight: 700,
     cursor: "pointer",
-    boxShadow: "0 10px 24px rgba(17,24,39,0.18)"
+    boxShadow: "0 10px 24px rgba(17,24,39,0.18)",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center"
   } as React.CSSProperties,
   buttonGhost: {
     background: "rgba(255,255,255,0.12)",
@@ -160,15 +170,6 @@ const styles = {
     textDecoration: "none",
     display: "inline-flex",
     alignItems: "center"
-  } as React.CSSProperties,
-  buttonSoft: {
-    background: "#111827",
-    color: "#fff",
-    border: "none",
-    borderRadius: "10px",
-    padding: "10px 12px",
-    fontWeight: 700,
-    cursor: "pointer"
   } as React.CSSProperties,
   buttonMuted: {
     background: "#fff",
@@ -327,8 +328,7 @@ const styles = {
     borderRadius: "16px",
     padding: "16px",
     background: "#fafafa",
-    cursor: "pointer",
-    transition: "all 0.2s ease"
+    cursor: "pointer"
   } as React.CSSProperties,
   businessGrid: {
     display: "grid",
@@ -446,6 +446,7 @@ function App() {
   const [loading, setLoading] = React.useState(true);
   const [authenticated, setAuthenticated] = React.useState(false);
   const [user, setUser] = React.useState<MeResponse["user"] | null>(null);
+  const [systemStatus, setSystemStatus] = React.useState<SystemStatus | null>(null);
 
   const [importing, setImporting] = React.useState(false);
   const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
@@ -464,6 +465,16 @@ function App() {
   const [search, setSearch] = React.useState("");
   const [busyBusinessId, setBusyBusinessId] = React.useState<number | null>(null);
   const [activeAccount, setActiveAccount] = React.useState<AccountRow | null>(null);
+
+  async function loadSystemStatus() {
+    const res = await fetch("/api/system/status", {
+      credentials: "include"
+    });
+
+    if (!res.ok) return;
+    const data = await res.json();
+    setSystemStatus(data);
+  }
 
   async function loadMe() {
     const res = await fetch("/api/auth/me", {
@@ -540,7 +551,7 @@ function App() {
   }
 
   React.useEffect(() => {
-    loadMe()
+    Promise.all([loadMe(), loadSystemStatus()])
       .catch(() => {
         setAuthenticated(false);
         setUser(null);
@@ -551,10 +562,15 @@ function App() {
   }, []);
 
   React.useEffect(() => {
-    if (!authenticated || !user?.googleBusinessConnected) return;
+    if (!authenticated) return;
 
-    loadAccounts();
-    loadBusinesses(selectedAccountId, selectedPortfolioType);
+    if (user?.googleBusinessConnected) {
+      loadAccounts();
+      loadBusinesses(selectedAccountId, selectedPortfolioType);
+    } else {
+      setAccounts([]);
+      setBusinesses([]);
+    }
   }, [authenticated, user?.googleBusinessConnected, selectedAccountId, selectedPortfolioType]);
 
   async function handleLogout() {
@@ -626,6 +642,11 @@ function App() {
   }
 
   async function handleAiAnalysis(businessId: number) {
+    if (!systemStatus?.aiConfigured) {
+      alert("A IA não está configurada. Crie a variável GEMINI_API_KEY no Railway.");
+      return;
+    }
+
     setBusyBusinessId(businessId);
 
     try {
@@ -717,6 +738,8 @@ function App() {
     );
   }
 
+  const googleBusinessMissing = !user?.googleBusinessConnected;
+
   return (
     <div style={styles.page}>
       <div style={styles.shell}>
@@ -730,7 +753,7 @@ function App() {
             </div>
 
             <div style={styles.topActions}>
-              {user?.googleBusinessConnected && (
+              {user?.googleBusinessConnected ? (
                 <button
                   onClick={handleImportPortfolio}
                   disabled={importing}
@@ -738,6 +761,10 @@ function App() {
                 >
                   {importing ? "Importando..." : "Atualizar importação"}
                 </button>
+              ) : (
+                <a href="/api/auth/google-business-connect" style={styles.buttonPrimary}>
+                  Conectar Google Business Profile
+                </a>
               )}
 
               <button onClick={handleLogout} style={styles.buttonGhost}>
@@ -777,7 +804,7 @@ function App() {
           <div style={styles.sectionTitleRow}>
             <div>
               <h2 style={styles.sectionTitle}>Usuário autenticado</h2>
-              <p style={styles.sectionHint}>Conexão ativa com Google e Google Business Profile</p>
+              <p style={styles.sectionHint}>Status da conexão e das integrações</p>
             </div>
           </div>
 
@@ -794,19 +821,69 @@ function App() {
 
               <div style={styles.chipRow}>
                 <span style={styles.chipSuccess}>Google conectado</span>
-                <span
-                  style={
-                    user?.googleBusinessConnected ? styles.chipSuccess : styles.chipWarn
-                  }
-                >
-                  {user?.googleBusinessConnected
-                    ? "Google Business conectado"
-                    : "Google Business não conectado"}
-                </span>
-                <span style={styles.chip}>ID interno: {user?.id}</span>
+
+                {user?.googleBusinessConnected ? (
+                  <span style={styles.chipSuccess}>Google Business conectado</span>
+                ) : (
+                  <span style={styles.chipDanger}>Google Business não conectado</span>
+                )}
+
+                {systemStatus?.aiConfigured ? (
+                  <span style={styles.chipSuccess}>
+                    IA ativa ({systemStatus.geminiModel || "Gemini"})
+                  </span>
+                ) : (
+                  <span style={styles.chipWarn}>IA não configurada</span>
+                )}
               </div>
             </div>
           </div>
+
+          {googleBusinessMissing ? (
+            <div
+              style={{
+                marginTop: 16,
+                padding: 16,
+                borderRadius: 14,
+                background: "#fff7ed",
+                border: "1px solid #fed7aa",
+                color: "#9a3412"
+              }}
+            >
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                Falta conectar o Google Business Profile
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                Seu login atual voltou só com escopos básicos do Google. Sem o escopo
+                <code> business.manage </code>
+                a ferramenta não consegue puxar contas e perfis.
+              </div>
+              <a href="/api/auth/google-business-connect" style={styles.buttonPrimary}>
+                Conectar Google Business Profile agora
+              </a>
+            </div>
+          ) : null}
+
+          {!systemStatus?.aiConfigured ? (
+            <div
+              style={{
+                marginTop: 16,
+                padding: 16,
+                borderRadius: 14,
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                color: "#1d4ed8"
+              }}
+            >
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                IA ainda não configurada
+              </div>
+              <div>
+                Crie a variável <code>GEMINI_API_KEY</code> no Railway para liberar as análises
+                automáticas com Gemini.
+              </div>
+            </div>
+          ) : null}
 
           {importError && (
             <div style={{ marginTop: 16, color: "#b91c1c", fontWeight: 700 }}>
@@ -815,305 +892,280 @@ function App() {
           )}
         </div>
 
-        {activeAccount ? (
+        {!googleBusinessMissing && activeAccount ? (
           <div style={{ marginTop: 18 }}>
-            <AccountDashboard
-              account={activeAccount}
-              businesses={activeAccountBusinesses}
-              onBack={() => setActiveAccount(null)}
-            />
+            <AccountDashboard account={activeAccount} businesses={activeAccountBusinesses} />
           </div>
         ) : null}
 
-        <div style={{ ...styles.surface, ...styles.section, marginTop: 18 }}>
-          <div style={styles.sectionTitleRow}>
-            <div>
-              <h2 style={styles.sectionTitle}>Contas importadas</h2>
-              <p style={styles.sectionHint}>Clique numa conta para abrir o dashboard dela</p>
-            </div>
-
-            <div style={styles.controlsRow}>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nome, categoria, cidade ou conta"
-                style={styles.input}
-              />
-
-              <select
-                value={selectedAccountId}
-                onChange={(e) => setSelectedAccountId(e.target.value)}
-                style={styles.select}
-              >
-                <option value="all">Todas as contas</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.accountId}>
-                    {(account.accountDisplayName || account.accountId) +
-                      ` (${account.locationsCount})`}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={selectedPortfolioType}
-                onChange={(e) => setSelectedPortfolioType(e.target.value)}
-                style={styles.select}
-              >
-                <option value="all">Todas as classificações</option>
-                <option value="client">Clientes</option>
-                <option value="prospect">Prospects</option>
-                <option value="ignore">Ignorar</option>
-                <option value="unclassified">Sem classificação</option>
-              </select>
-            </div>
-          </div>
-
-          {accountsLoading ? (
-            <div style={styles.empty}>Carregando contas...</div>
-          ) : accountsError ? (
-            <div style={{ ...styles.empty, color: "#b91c1c" }}>{accountsError}</div>
-          ) : accounts.length === 0 ? (
-            <div style={styles.empty}>Nenhuma conta importada ainda.</div>
-          ) : (
-            <div style={styles.accountsGrid}>
-              {accounts.map((account) => (
-                <div
-                  key={account.id}
-                  style={styles.accountCard}
-                  onClick={() => setActiveAccount(account)}
-                >
-                  <div style={{ fontWeight: 800, fontSize: 16 }}>
-                    {account.accountDisplayName || account.accountId}
-                  </div>
-
-                  <div style={styles.chipRow}>
-                    <span style={styles.chip}>{account.accountType || "N/A"}</span>
-                    <span style={styles.chipSuccess}>
-                      {account.locationsCount} perfil(is)
-                    </span>
-                  </div>
-
-                  <div style={{ marginTop: 12, color: "#6b7280", fontSize: 13 }}>
-                    <div>Account ID: {account.accountId}</div>
-                    <div>Google name: {account.googleAccountName}</div>
-                  </div>
+        {!googleBusinessMissing && (
+          <>
+            <div style={{ ...styles.surface, ...styles.section, marginTop: 18 }}>
+              <div style={styles.sectionTitleRow}>
+                <div>
+                  <h2 style={styles.sectionTitle}>Contas importadas</h2>
+                  <p style={styles.sectionHint}>Clique numa conta para abrir o dashboard dela</p>
                 </div>
-              ))}
+
+                <div style={styles.controlsRow}>
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Buscar por nome, categoria, cidade ou conta"
+                    style={styles.input}
+                  />
+
+                  <select
+                    value={selectedAccountId}
+                    onChange={(e) => setSelectedAccountId(e.target.value)}
+                    style={styles.select}
+                  >
+                    <option value="all">Todas as contas</option>
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.accountId}>
+                        {(account.accountDisplayName || account.accountId) +
+                          ` (${account.locationsCount})`}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={selectedPortfolioType}
+                    onChange={(e) => setSelectedPortfolioType(e.target.value)}
+                    style={styles.select}
+                  >
+                    <option value="all">Todas as classificações</option>
+                    <option value="client">Clientes</option>
+                    <option value="prospect">Prospects</option>
+                    <option value="ignore">Ignorar</option>
+                    <option value="unclassified">Sem classificação</option>
+                  </select>
+                </div>
+              </div>
+
+              {accountsLoading ? (
+                <div style={styles.empty}>Carregando contas...</div>
+              ) : accountsError ? (
+                <div style={{ ...styles.empty, color: "#b91c1c" }}>{accountsError}</div>
+              ) : accounts.length === 0 ? (
+                <div style={styles.empty}>
+                  Nenhuma conta carregada ainda. Faça a conexão do Google Business e rode a
+                  importação.
+                </div>
+              ) : (
+                <div style={styles.accountsGrid}>
+                  {accounts.map((account) => (
+                    <div
+                      key={account.id}
+                      style={styles.accountCard}
+                      onClick={() => setActiveAccount(account)}
+                    >
+                      <div style={{ fontWeight: 800, fontSize: 16 }}>
+                        {account.accountDisplayName || account.accountId}
+                      </div>
+
+                      <div style={styles.chipRow}>
+                        <span style={styles.chip}>{account.accountType || "N/A"}</span>
+                        <span style={styles.chipSuccess}>
+                          {account.locationsCount} perfil(is)
+                        </span>
+                      </div>
+
+                      <div style={{ marginTop: 12, color: "#6b7280", fontSize: 13 }}>
+                        <div>Account ID: {account.accountId}</div>
+                        <div>Google name: {account.googleAccountName}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        <div style={{ ...styles.surface, ...styles.section, marginTop: 18 }}>
-          <div style={styles.sectionTitleRow}>
-            <div>
-              <h2 style={styles.sectionTitle}>Perfis importados</h2>
-              <p style={styles.sectionHint}>
-                {filteredBusinesses.length} perfil(is) exibido(s)
-              </p>
-            </div>
-          </div>
+            <div style={{ ...styles.surface, ...styles.section, marginTop: 18 }}>
+              <div style={styles.sectionTitleRow}>
+                <div>
+                  <h2 style={styles.sectionTitle}>Perfis importados</h2>
+                  <p style={styles.sectionHint}>
+                    {filteredBusinesses.length} perfil(is) exibido(s)
+                  </p>
+                </div>
+              </div>
 
-          {businessesLoading ? (
-            <div style={styles.empty}>Carregando perfis...</div>
-          ) : businessesError ? (
-            <div style={{ ...styles.empty, color: "#b91c1c" }}>{businessesError}</div>
-          ) : filteredBusinesses.length === 0 ? (
-            <div style={styles.empty}>Nenhum perfil encontrado para esse filtro.</div>
-          ) : (
-            <div style={styles.businessGrid}>
-              {filteredBusinesses.map((business) => {
-                const tone = scoreTone(business.score);
+              {businessesLoading ? (
+                <div style={styles.empty}>Carregando perfis...</div>
+              ) : businessesError ? (
+                <div style={{ ...styles.empty, color: "#b91c1c" }}>{businessesError}</div>
+              ) : filteredBusinesses.length === 0 ? (
+                <div style={styles.empty}>Nenhum perfil encontrado para esse filtro.</div>
+              ) : (
+                <div style={styles.businessGrid}>
+                  {filteredBusinesses.map((business) => {
+                    const tone = scoreTone(business.score);
 
-                return (
-                  <div key={business.id} style={styles.businessCard}>
-                    <div style={styles.businessTop}>
-                      <div>
-                        <h3 style={styles.businessTitle}>{business.name}</h3>
-                        <div style={{ color: "#6b7280", marginTop: 6, fontSize: 14 }}>
-                          {compactText(business.primaryCategory)}
+                    return (
+                      <div key={business.id} style={styles.businessCard}>
+                        <div style={styles.businessTop}>
+                          <div>
+                            <h3 style={styles.businessTitle}>{business.name}</h3>
+                            <div style={{ color: "#6b7280", marginTop: 6, fontSize: 14 }}>
+                              {compactText(business.primaryCategory)}
+                            </div>
+
+                            <div style={styles.chipRow}>
+                              <span style={styles.chip}>
+                                {business.portfolioType === "client"
+                                  ? "Cliente"
+                                  : business.portfolioType === "prospect"
+                                  ? "Prospect"
+                                  : business.portfolioType === "ignore"
+                                  ? "Ignorar"
+                                  : "Sem classificação"}
+                              </span>
+
+                              <span style={opportunityTone(business.opportunityLevel)}>
+                                Oportunidade {business.opportunityLevel}
+                              </span>
+
+                              {business.location?.isVerified ||
+                              business.location?.verificationState === "VERIFIED" ? (
+                                <span style={styles.chipSuccess}>Verificado</span>
+                              ) : (
+                                <span style={styles.chipDanger}>Não verificado</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              ...styles.scoreBadge,
+                              background: tone.background,
+                              color: tone.color
+                            }}
+                          >
+                            {business.score}/100
+                          </div>
                         </div>
 
-                        <div style={styles.chipRow}>
-                          <span style={styles.chip}>
-                            {business.portfolioType === "client"
-                              ? "Cliente"
-                              : business.portfolioType === "prospect"
-                              ? "Prospect"
-                              : business.portfolioType === "ignore"
-                              ? "Ignorar"
-                              : "Sem classificação"}
-                          </span>
+                        <div style={styles.metaGrid}>
+                          <div style={styles.metaItem}>
+                            <span style={styles.metaLabel}>Conta</span>
+                            {compactText(
+                              business.account?.accountDisplayName || business.account?.accountId
+                            )}
+                          </div>
 
-                          <span style={opportunityTone(business.opportunityLevel)}>
-                            Oportunidade {business.opportunityLevel}
-                          </span>
+                          <div style={styles.metaItem}>
+                            <span style={styles.metaLabel}>Tipo da conta</span>
+                            {compactText(business.account?.accountType)}
+                          </div>
 
-                          {business.location?.isVerified ||
-                          business.location?.verificationState === "VERIFIED" ? (
-                            <span style={styles.chipSuccess}>Verificado</span>
+                          <div style={styles.metaItem}>
+                            <span style={styles.metaLabel}>Cidade / UF</span>
+                            {compactText(
+                              [business.city, business.state].filter(Boolean).join(" / ")
+                            )}
+                          </div>
+
+                          <div style={styles.metaItem}>
+                            <span style={styles.metaLabel}>Telefone</span>
+                            {compactText(business.phone)}
+                          </div>
+                        </div>
+
+                        <div style={styles.insightList}>
+                          {business.insights.length > 0 ? (
+                            business.insights.map((insight, index) => (
+                              <span key={index} style={styles.insightChip}>
+                                {insight}
+                              </span>
+                            ))
                           ) : (
-                            <span style={styles.chipDanger}>Não verificado</span>
+                            <span style={styles.chipSuccess}>Sem alertas iniciais</span>
                           )}
                         </div>
-                      </div>
 
-                      <div
-                        style={{
-                          ...styles.scoreBadge,
-                          background: tone.background,
-                          color: tone.color
-                        }}
-                      >
-                        {business.score}/100
-                      </div>
-                    </div>
-
-                    <div style={styles.metaGrid}>
-                      <div style={styles.metaItem}>
-                        <span style={styles.metaLabel}>Conta</span>
-                        {compactText(
-                          business.account?.accountDisplayName || business.account?.accountId
-                        )}
-                      </div>
-
-                      <div style={styles.metaItem}>
-                        <span style={styles.metaLabel}>Tipo da conta</span>
-                        {compactText(business.account?.accountType)}
-                      </div>
-
-                      <div style={styles.metaItem}>
-                        <span style={styles.metaLabel}>Cidade / UF</span>
-                        {compactText([business.city, business.state].filter(Boolean).join(" / "))}
-                      </div>
-
-                      <div style={styles.metaItem}>
-                        <span style={styles.metaLabel}>Telefone</span>
-                        {compactText(business.phone)}
-                      </div>
-
-                      <div style={styles.metaItem}>
-                        <span style={styles.metaLabel}>Website</span>
-                        {business.website ? (
-                          <a
-                            href={business.website}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ color: "#2563eb", textDecoration: "none" }}
+                        <div style={styles.rowButtons}>
+                          <button
+                            style={styles.buttonMuted}
+                            disabled={busyBusinessId === business.id}
+                            onClick={() =>
+                              handleClassification(business.id, "client", business.notes)
+                            }
                           >
-                            Abrir site
-                          </a>
-                        ) : (
-                          "N/A"
-                        )}
-                      </div>
+                            Marcar cliente
+                          </button>
 
-                      <div style={styles.metaItem}>
-                        <span style={styles.metaLabel}>Location ID</span>
-                        {compactText(business.location?.locationId)}
-                      </div>
-                    </div>
+                          <button
+                            style={styles.buttonMuted}
+                            disabled={busyBusinessId === business.id}
+                            onClick={() =>
+                              handleClassification(business.id, "prospect", business.notes)
+                            }
+                          >
+                            Marcar prospect
+                          </button>
 
-                    <div style={styles.insightList}>
-                      {business.insights.length > 0 ? (
-                        business.insights.map((insight, index) => (
-                          <span key={index} style={styles.insightChip}>
-                            {insight}
-                          </span>
-                        ))
-                      ) : (
-                        <span style={styles.chipSuccess}>Sem alertas iniciais</span>
-                      )}
-                    </div>
+                          <button
+                            style={styles.buttonMuted}
+                            disabled={busyBusinessId === business.id}
+                            onClick={() =>
+                              handleClassification(business.id, "ignore", business.notes)
+                            }
+                          >
+                            Ignorar
+                          </button>
 
-                    <div style={styles.rowButtons}>
-                      <button
-                        style={styles.buttonMuted}
-                        disabled={busyBusinessId === business.id}
-                        onClick={() =>
-                          handleClassification(business.id, "client", business.notes)
-                        }
-                      >
-                        Marcar cliente
-                      </button>
-
-                      <button
-                        style={styles.buttonMuted}
-                        disabled={busyBusinessId === business.id}
-                        onClick={() =>
-                          handleClassification(business.id, "prospect", business.notes)
-                        }
-                      >
-                        Marcar prospect
-                      </button>
-
-                      <button
-                        style={styles.buttonMuted}
-                        disabled={busyBusinessId === business.id}
-                        onClick={() =>
-                          handleClassification(business.id, "ignore", business.notes)
-                        }
-                      >
-                        Ignorar
-                      </button>
-
-                      <button
-                        style={styles.buttonSoft}
-                        disabled={busyBusinessId === business.id}
-                        onClick={() => handleAiAnalysis(business.id)}
-                      >
-                        {busyBusinessId === business.id ? "Gerando..." : "Gerar análise IA"}
-                      </button>
-                    </div>
-
-                    {business.aiSummaryJson ? (
-                      <div style={{ marginTop: 16, background: "#f8fafc", borderRadius: 12, padding: 14 }}>
-                        <div style={{ fontWeight: 800, marginBottom: 8 }}>Análise com IA</div>
-
-                        <div style={{ marginBottom: 10 }}>
-                          <span style={styles.metaLabel}>Resumo</span>
-                          <div>{business.aiSummaryJson.summary || "N/A"}</div>
+                          <button
+                            style={styles.buttonPrimary}
+                            disabled={busyBusinessId === business.id || !systemStatus?.aiConfigured}
+                            onClick={() => handleAiAnalysis(business.id)}
+                          >
+                            {busyBusinessId === business.id ? "Gerando..." : "Gerar análise IA"}
+                          </button>
                         </div>
 
-                        <div style={{ marginBottom: 10 }}>
-                          <span style={styles.metaLabel}>Diagnóstico de ranqueamento</span>
-                          <div>{business.aiSummaryJson.rankingDiagnosis || "N/A"}</div>
-                        </div>
+                        {business.aiSummaryJson ? (
+                          <div
+                            style={{
+                              marginTop: 16,
+                              background: "#f8fafc",
+                              borderRadius: 12,
+                              padding: 14
+                            }}
+                          >
+                            <div style={{ fontWeight: 800, marginBottom: 8 }}>Análise com IA</div>
 
-                        <div style={{ marginBottom: 10 }}>
-                          <span style={styles.metaLabel}>Oportunidade comercial</span>
-                          <div>{business.aiSummaryJson.opportunityAnalysis || "N/A"}</div>
-                        </div>
+                            <div style={{ marginBottom: 10 }}>
+                              <span style={styles.metaLabel}>Resumo</span>
+                              <div>{business.aiSummaryJson.summary || "N/A"}</div>
+                            </div>
 
-                        <div style={{ marginBottom: 10 }}>
-                          <span style={styles.metaLabel}>Prioridades</span>
-                          <ul style={{ margin: "8px 0 0 18px" }}>
-                            {(business.aiSummaryJson.priorities || []).map((item, idx) => (
-                              <li key={idx}>{item}</li>
-                            ))}
-                          </ul>
-                        </div>
+                            <div style={{ marginBottom: 10 }}>
+                              <span style={styles.metaLabel}>Diagnóstico de ranqueamento</span>
+                              <div>{business.aiSummaryJson.rankingDiagnosis || "N/A"}</div>
+                            </div>
 
-                        <details style={{ ...styles.details, marginTop: 10 }}>
-                          <summary style={styles.summary}>Ver pitch comercial sugerido</summary>
-                          <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
-                            {business.aiSummaryJson.pitch || "N/A"}
+                            <div style={{ marginBottom: 10 }}>
+                              <span style={styles.metaLabel}>Oportunidade comercial</span>
+                              <div>{business.aiSummaryJson.opportunityAnalysis || "N/A"}</div>
+                            </div>
+
+                            <details style={{ ...styles.details, marginTop: 10 }}>
+                              <summary style={styles.summary}>Ver pitch comercial sugerido</summary>
+                              <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
+                                {business.aiSummaryJson.pitch || "N/A"}
+                              </div>
+                            </details>
                           </div>
-                        </details>
+                        ) : null}
                       </div>
-                    ) : null}
-
-                    <details style={styles.details}>
-                      <summary style={styles.summary}>Ver composição do score</summary>
-                      <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
-                        {JSON.stringify(business.breakdown, null, 2)}
-                      </pre>
-                    </details>
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
