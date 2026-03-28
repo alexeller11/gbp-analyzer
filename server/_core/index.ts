@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import { testDatabaseConnection } from "../db";
 import googleAuthRoutes from "../routes/google-auth.routes";
 import gbpRoutes from "../routes/gbp.routes";
+import systemRoutes from "../routes/system.routes";
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
@@ -23,6 +24,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(googleAuthRoutes);
 app.use(gbpRoutes);
+app.use(systemRoutes);
 
 app.get("/health", async (_req, res) => {
   try {
@@ -44,10 +46,6 @@ app.get("/health", async (_req, res) => {
   }
 });
 
-console.log("Diretório do servidor:", __dirname);
-console.log("Diretório público esperado:", publicPath);
-console.log("index.html existe?", existsSync(indexHtmlPath));
-
 if (existsSync(indexHtmlPath)) {
   app.use(express.static(publicPath));
 
@@ -65,7 +63,8 @@ if (existsSync(indexHtmlPath)) {
 }
 
 app.listen(PORT, async () => {
-  console.log(`GBP Analyzer ativo na porta ${PORT}`);
+  console.log(`✅ GBP Analyzer ativo na porta ${PORT}`);
+  console.log(`   NODE_ENV: ${process.env.NODE_ENV || "development"}`);
 
   try {
     await testDatabaseConnection();
