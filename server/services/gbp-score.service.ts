@@ -46,6 +46,10 @@ export function calculateGbpScore(
     consistencyBonus: 0
   };
 
+  const isVerified =
+    Boolean(business.location?.isVerified) ||
+    business.location?.verificationState === "VERIFIED";
+
   if (business.name?.trim()) {
     breakdown.name = 10;
     score += breakdown.name;
@@ -86,11 +90,7 @@ export function calculateGbpScore(
     priorities.push("Revisar localização e consistência geográfica");
   }
 
-  const isVerified =
-  business.location?.isVerified ||
-  business.location?.verificationState === "VERIFIED";
-
-if (isVerified) {
+  if (isVerified) {
     breakdown.verification = 30;
     score += breakdown.verification;
   } else {
@@ -114,7 +114,7 @@ if (isVerified) {
 
   let opportunityScore = 0;
 
-  if (!business.location?.isVerified) opportunityScore += 35;
+  if (!isVerified) opportunityScore += 35;
   if (!business.website?.trim()) opportunityScore += 20;
   if (!business.phone?.trim()) opportunityScore += 10;
   if (!business.primaryCategory?.trim()) opportunityScore += 20;
