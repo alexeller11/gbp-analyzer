@@ -10,9 +10,8 @@ cmds = [
 
 [phases.build]
 cmds = [
-  "pnpm build",
-  "pnpm db:push"
+  "pnpm build"
 ]
 
 [start]
-cmd = "node dist/index.js"
+cmd = "pnpm db:push && node dist/index.js"
