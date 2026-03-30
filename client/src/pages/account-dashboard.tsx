@@ -14,59 +14,11 @@ type AccountRow = {
 type BusinessRow = {
   id: number;
   name: string;
-  primaryCategory: string | null;
-  city: string | null;
-  state: string | null;
-  phone: string | null;
-  website: string | null;
-  status: string;
-  source: string;
-  googleLocationKey: string;
-  portfolioType: string;
-  notes: string | null;
-  aiSummaryJson: {
-    summary?: string;
-    rankingDiagnosis?: string;
-    priorities?: string[];
-    opportunityAnalysis?: string;
-    pitch?: string;
-  } | null;
-  lastAiAnalysisAt: string | null;
-  createdAt: string;
-  updatedAt: string;
   score: number;
   opportunityScore: number;
   opportunityLevel: "baixa" | "media" | "alta";
-  insights: string[];
-  priorities: string[];
-  breakdown: {
-    name: number;
-    category: number;
-    phone: number;
-    website: number;
-    city: number;
-    verification: number;
-    consistencyBonus: number;
-  };
-  location: {
-    id: number;
-    googleLocationName: string;
-    locationId: string;
-    title: string;
-    storeCode: string | null;
-    languageCode: string | null;
-    verificationState: string | null;
-    isVerified: boolean;
-    lastImportedAt: string | null;
-    lastSyncedAt: string | null;
-  } | null;
-  account: {
-    id: number;
-    accountId: string;
-    accountDisplayName: string | null;
-    accountType: string | null;
-    googleAccountName: string;
-  } | null;
+  portfolioType: string;
+  effectiveVerified: boolean;
 };
 
 type Props = {
@@ -148,14 +100,10 @@ export default function AccountDashboard({ account, businesses }: Props) {
   const title = account?.accountDisplayName || "Visão geral da carteira";
   const total = businesses.length;
   const avg = averageScore(businesses);
-  const verified = businesses.filter(
-    (b) => b.location?.isVerified || b.location?.verificationState === "VERIFIED"
-  ).length;
+  const verified = businesses.filter((b) => b.effectiveVerified).length;
   const highOpp = businesses.filter((b) => b.opportunityLevel === "alta").length;
   const clients = businesses.filter((b) => b.portfolioType === "client").length;
   const prospects = businesses.filter((b) => b.portfolioType === "prospect").length;
-  const noWebsite = businesses.filter((b) => !b.website).length;
-  const noPhone = businesses.filter((b) => !b.phone).length;
   const critical = businesses.filter((b) => b.score < 50).length;
 
   const weakest = [...businesses].sort((a, b) => a.score - b.score).slice(0, 5);
@@ -184,7 +132,7 @@ export default function AccountDashboard({ account, businesses }: Props) {
         </div>
 
         <div style={ui.card}>
-          <div style={ui.label}>Verificados</div>
+          <div style={ui.label}>Confirmados</div>
           <p style={ui.value}>{verified}</p>
         </div>
 
@@ -206,16 +154,6 @@ export default function AccountDashboard({ account, businesses }: Props) {
         <div style={ui.card}>
           <div style={ui.label}>Prospects</div>
           <p style={ui.value}>{prospects}</p>
-        </div>
-
-        <div style={ui.card}>
-          <div style={ui.label}>Sem site</div>
-          <p style={ui.value}>{noWebsite}</p>
-        </div>
-
-        <div style={ui.card}>
-          <div style={ui.label}>Sem telefone</div>
-          <p style={ui.value}>{noPhone}</p>
         </div>
       </div>
 
