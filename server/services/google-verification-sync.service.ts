@@ -1,49 +1,147 @@
-import { getVoiceOfMerchantState } from "../google/verification.service";
-import { eq } from "drizzle-orm";
-import { db } from "../db";
-import { gbpLocations } from "../../drizzle/schema";
-import { getValidGoogleAccessToken } from "./google-connection.service";
-import { getVoiceOfMerchantState } from "../google/verification.service";
+import { computeEffectiveVerification } from "../google/verification.service";
 
-export async function syncVerificationForUser(userId: number) {
-  const { accessToken } = await getValidGoogleAccessToken(userId);
+export type GbpScoredBusinessInput = {
+  name: string;
+  primaryCategory: string | null;
+  city: string | null;
+  state: string | null;
+  phone: string | null;
+  website: string | null;
+  portfolioType?: string | null;
+  location: {
+    isVerified: boolean;
+    verificationState: string | null;
+    hasVoiceOfMerchant?: boolean;
+    hasBusinessAuthority?: boolean;
+  } | null;
+};
 
-  const locations = await db.query.gbpLocations.findMany({
-    where: eq(gbpLocations.userId, userId)
+export type GbpScoreResult = {
+  score: number;
+  opportunityScore: number;
+  opportunityLevel: "baixa" | "media" | "alta";
+  effectiveVerified: boolean;
+  insights: string[];
+  priorities: string[];
+  breakdown: {
+    name: number;
+    category: number;
+    phone: number;
+    website: number;
+    city: number;
+    verification: number;
+    consistencyBonus: number;
+  };
+};
+
+export function calculateGbpScore(
+  business: GbpScoredBusinessInput
+): GbpScoreResult {
+  let score = 0;
+  const insights: string[] = [];
+  const priorities: string[] = [];
+
+  const breakdown = {
+    name: 0,
+    category: 0,
+    phone: 0,
+    website: 0,
+    city: 0,
+    verification: 0,
+    consistencyBonus: 0
+  };
+
+  const effectiveVerified = computeEffectiveVerification({
+    isVerified: Boolean(business.location?.isVerified),
+    verificationState: business.location?.verificationState ?? null,
+    hasVoiceOfMerchant: Boolean(business.location?.hasVoiceOfMerchant),
+    hasBusinessAuthority: Boolean(business.location?.hasBusinessAuthority)
   });
 
-  let synced = 0;
-  let confirmed = 0;
-
-  for (const location of locations) {
-    const state = await getVoiceOfMerchantState(accessToken, location.locationId);
-
-    if (!state) {
-      continue;
-    }
-
-    await db
-      .update(gbpLocations)
-      .set({
-        hasVoiceOfMerchant: Boolean(state.hasVoiceOfMerchant),
-        hasBusinessAuthority: Boolean(state.hasBusinessAuthority),
-        verificationSource: "voice_of_merchant",
-        verificationJson: state,
-        lastVerificationSyncAt: new Date(),
-        updatedAt: new Date()
-      })
-      .where(eq(gbpLocations.id, location.id));
-
-    synced += 1;
-
-    if (state.hasVoiceOfMerchant || state.hasBusinessAuthority) {
-      confirmed += 1;
-    }
+  if (business.name?.trim()) {
+    breakdown.name = 10;
+    score += breakdown.name;
+  } else {
+    insights.push("Nome do perfil ausente ou incompleto");
+    priorities.push("Revisar o nome do perfil");
   }
 
+  if (business.primaryCategory?.trim()) {
+    breakdown.category = 15;
+    score += breakdown.category;
+  } else {
+    insights.push("Categoria principal não definida corretamente");
+    priorities.push("Definir ou revisar a categoria principal");
+  }
+
+  if (business.phone?.trim()) {
+    breakdown.phone = 10;
+    score += breakdown.phone;
+  } else {
+    insights.push("Telefone não cadastrado");
+    priorities.push("Cadastrar telefone");
+  }
+
+  if (business.website?.trim()) {
+    breakdown.website = 15;
+    score += breakdown.website;
+  } else {
+    insights.push("Site não vinculado ao perfil");
+    priorities.push("Adicionar site ou landing page");
+  }
+
+  if (business.city?.trim() && business.state?.trim()) {
+    breakdown.city = 10;
+    score += breakdown.city;
+  } else {
+    insights.push("Cidade ou estado incompletos no perfil");
+    priorities.push("Revisar localização e consistência geográfica");
+  }
+
+  if (effectiveVerified) {
+    breakdown.verification = 30;
+    score += breakdown.verification;
+  } else {
+    insights.push("Perfil sem confirmação forte de verificação/autoridade");
+    priorities.push("Validar a autoridade do perfil no Google");
+  }
+
+  if (
+    business.primaryCategory?.trim() &&
+    business.phone?.trim() &&
+    business.website?.trim()
+  ) {
+    breakdown.consistencyBonus = 10;
+    score += breakdown.consistencyBonus;
+  } else {
+    insights.push("Perfil sem consistência completa de informações básicas");
+    priorities.push("Completar informações essenciais do perfil");
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
+  let opportunityScore = 0;
+
+  if (!effectiveVerified) opportunityScore += 35;
+  if (!business.website?.trim()) opportunityScore += 20;
+  if (!business.phone?.trim()) opportunityScore += 10;
+  if (!business.primaryCategory?.trim()) opportunityScore += 20;
+  if (score < 50) opportunityScore += 25;
+  if (business.portfolioType === "prospect") opportunityScore += 10;
+
+  opportunityScore = Math.max(0, Math.min(100, opportunityScore));
+
+  let opportunityLevel: "baixa" | "media" | "alta" = "baixa";
+  if (opportunityScore >= 60) opportunityLevel = "alta";
+  else if (opportunityScore >= 30) opportunityLevel = "media";
+
   return {
-    totalLocations: locations.length,
-    synced,
-    confirmed
+    score,
+    opportunityScore,
+    opportunityLevel,
+    effectiveVerified,
+    insights,
+    priorities,
+    breakdown
   };
 }
