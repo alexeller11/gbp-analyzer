@@ -4,6 +4,7 @@ import { verifySessionToken } from "../auth/session";
 import { importGoogleBusinessPortfolio } from "../services/google-import.service";
 import { calculateGbpScore } from "../services/gbp-score.service";
 import { generateAiAnalysis } from "../services/ai-insights.service";
+import { syncVerificationForUser } from "../services/google-verification-sync.service";
 import { db } from "../db";
 import { gbpAccounts, gbpLocations, businesses } from "../../drizzle/schema";
 
@@ -40,6 +41,24 @@ router.post("/api/gbp/import", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message || "Erro ao importar portfolio GBP"
+    });
+  }
+});
+
+router.post("/api/gbp/verification-sync", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const result = await syncVerificationForUser(userId);
+
+    return res.status(200).json({
+      ok: true,
+      result
+    });
+  } catch (error: any) {
+    console.error("Erro ao sincronizar verificação:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao sincronizar verificação"
     });
   }
 });
@@ -136,7 +155,9 @@ router.get("/api/gbp/businesses", async (req, res) => {
           location: location
             ? {
                 isVerified: location.isVerified,
-                verificationState: location.verificationState
+                verificationState: location.verificationState,
+                hasVoiceOfMerchant: location.hasVoiceOfMerchant,
+                hasBusinessAuthority: location.hasBusinessAuthority
               }
             : null
         });
@@ -161,6 +182,7 @@ router.get("/api/gbp/businesses", async (req, res) => {
           score: scoreData.score,
           opportunityScore: scoreData.opportunityScore,
           opportunityLevel: scoreData.opportunityLevel,
+          effectiveVerified: scoreData.effectiveVerified,
           insights: scoreData.insights,
           priorities: scoreData.priorities,
           breakdown: scoreData.breakdown,
@@ -174,8 +196,12 @@ router.get("/api/gbp/businesses", async (req, res) => {
                 languageCode: location.languageCode,
                 verificationState: location.verificationState,
                 isVerified: location.isVerified,
+                hasVoiceOfMerchant: location.hasVoiceOfMerchant,
+                hasBusinessAuthority: location.hasBusinessAuthority,
+                verificationSource: location.verificationSource,
                 lastImportedAt: location.lastImportedAt,
-                lastSyncedAt: location.lastSyncedAt
+                lastSyncedAt: location.lastSyncedAt,
+                lastVerificationSyncAt: location.lastVerificationSyncAt
               }
             : null,
           account: account
@@ -312,7 +338,9 @@ router.post("/api/gbp/businesses/:id/ai-analysis", async (req, res) => {
       location: location
         ? {
             isVerified: location.isVerified,
-            verificationState: location.verificationState
+            verificationState: location.verificationState,
+            hasVoiceOfMerchant: location.hasVoiceOfMerchant,
+            hasBusinessAuthority: location.hasBusinessAuthority
           }
         : null
     });
@@ -331,9 +359,7 @@ router.post("/api/gbp/businesses/:id/ai-analysis", async (req, res) => {
       opportunityLevel: scoreData.opportunityLevel,
       insights: scoreData.insights,
       priorities: scoreData.priorities,
-      isVerified:
-        Boolean(location?.isVerified) ||
-        location?.verificationState === "VERIFIED",
+      isVerified: scoreData.effectiveVerified,
       verificationState: location?.verificationState ?? null,
       portfolioType: business.portfolioType
     });
