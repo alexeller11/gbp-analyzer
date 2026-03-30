@@ -35,6 +35,12 @@ type ImportResult = {
   }>;
 };
 
+type VerificationSyncResult = {
+  totalLocations: number;
+  synced: number;
+  confirmed: number;
+};
+
 type AccountRow = {
   id: number;
   googleAccountName: string;
@@ -72,6 +78,7 @@ type BusinessRow = {
   score: number;
   opportunityScore: number;
   opportunityLevel: "baixa" | "media" | "alta";
+  effectiveVerified: boolean;
   insights: string[];
   priorities: string[];
   breakdown: {
@@ -92,8 +99,12 @@ type BusinessRow = {
     languageCode: string | null;
     verificationState: string | null;
     isVerified: boolean;
+    hasVoiceOfMerchant: boolean;
+    hasBusinessAuthority: boolean;
+    verificationSource: string;
     lastImportedAt: string | null;
     lastSyncedAt: string | null;
+    lastVerificationSyncAt: string | null;
   } | null;
   account: {
     id: number;
@@ -423,12 +434,8 @@ const styles = {
 };
 
 function scoreTone(score: number) {
-  if (score >= 80) {
-    return { background: "#dcfce7", color: "#166534" };
-  }
-  if (score >= 60) {
-    return { background: "#fef3c7", color: "#92400e" };
-  }
+  if (score >= 80) return { background: "#dcfce7", color: "#166534" };
+  if (score >= 60) return { background: "#fef3c7", color: "#92400e" };
   return { background: "#fee2e2", color: "#b91c1c" };
 }
 
@@ -450,6 +457,7 @@ function App() {
 
   const [importing, setImporting] = React.useState(false);
   const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
+  const [verificationResult, setVerificationResult] = React.useState<VerificationSyncResult | null>(null);
   const [importError, setImportError] = React.useState<string | null>(null);
 
   const [accounts, setAccounts] = React.useState<AccountRow[]>([]);
@@ -470,7 +478,6 @@ function App() {
     const res = await fetch("/api/system/status", {
       credentials: "include"
     });
-
     if (!res.ok) return;
     const data = await res.json();
     setSystemStatus(data);
@@ -522,13 +529,8 @@ function App() {
     try {
       const params = new URLSearchParams();
 
-      if (accountId && accountId !== "all") {
-        params.set("accountId", accountId);
-      }
-
-      if (portfolioType && portfolioType !== "all") {
-        params.set("portfolioType", portfolioType);
-      }
+      if (accountId && accountId !== "all") params.set("accountId", accountId);
+      if (portfolioType && portfolioType !== "all") params.set("portfolioType", portfolioType);
 
       const query = params.toString() ? `?${params.toString()}` : "";
 
@@ -608,6 +610,28 @@ function App() {
     }
   }
 
+  async function handleVerificationSync() {
+    setImportError(null);
+
+    try {
+      const response = await fetch("/api/gbp/verification-sync", {
+        method: "POST",
+        credentials: "include"
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao sincronizar verificação");
+      }
+
+      setVerificationResult(data.result);
+      await loadBusinesses(selectedAccountId, selectedPortfolioType);
+    } catch (error: any) {
+      setImportError(error?.message || "Erro ao sincronizar verificação");
+    }
+  }
+
   async function handleClassification(
     businessId: number,
     portfolioType: string,
@@ -618,9 +642,7 @@ function App() {
     try {
       const res = await fetch(`/api/gbp/businesses/${businessId}/classification`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
           portfolioType,
@@ -629,9 +651,7 @@ function App() {
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || "Erro ao classificar perfil");
-      }
+      if (!res.ok) throw new Error(data?.error || "Erro ao classificar perfil");
 
       await loadBusinesses(selectedAccountId, selectedPortfolioType);
     } catch (error: any) {
@@ -656,9 +676,7 @@ function App() {
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || "Erro ao gerar análise com IA");
-      }
+      if (!res.ok) throw new Error(data?.error || "Erro ao gerar análise com IA");
 
       await loadBusinesses(selectedAccountId, selectedPortfolioType);
     } catch (error: any) {
@@ -692,14 +710,10 @@ function App() {
 
   const stats = React.useMemo(() => {
     const totalProfiles = businesses.length;
-    const verifiedProfiles = businesses.filter(
-      (b) => b.location?.isVerified || b.location?.verificationState === "VERIFIED"
-    ).length;
+    const verifiedProfiles = businesses.filter((b) => b.effectiveVerified).length;
     const averageScore =
       businesses.length > 0
-        ? Math.round(
-            businesses.reduce((acc, item) => acc + item.score, 0) / businesses.length
-          )
+        ? Math.round(businesses.reduce((acc, item) => acc + item.score, 0) / businesses.length)
         : 0;
     const criticalProfiles = businesses.filter((b) => b.score < 50).length;
     const highOpportunity = businesses.filter((b) => b.opportunityLevel === "alta").length;
@@ -715,22 +729,16 @@ function App() {
 
   const activeAccountBusinesses = React.useMemo(() => {
     if (!activeAccount) return [];
-    return businesses.filter(
-      (b) => b.account?.accountId === activeAccount.accountId
-    );
+    return businesses.filter((b) => b.account?.accountId === activeAccount.accountId);
   }, [activeAccount, businesses]);
 
   if (loading) {
-    return (
-      <div style={{ padding: 32, fontFamily: "Arial, sans-serif" }}>
-        Carregando...
-      </div>
-    );
+    return <div style={{ padding: 32 }}>Carregando...</div>;
   }
 
   if (!authenticated) {
     return (
-      <div style={{ padding: 32, fontFamily: "Arial, sans-serif" }}>
+      <div style={{ padding: 32 }}>
         <h1>GBP Analyzer</h1>
         <p>Você ainda não está logado.</p>
         <a href="/api/auth/google-login">Entrar com Google</a>
@@ -748,19 +756,21 @@ function App() {
             <div>
               <h1 style={styles.title}>GBP Analyzer</h1>
               <p style={styles.subtitle}>
-                Diagnóstico, classificação e oportunidade comercial para Google Business Profile.
+                Modo agência: contas, perfis, oportunidade comercial, IA e verificação confiável.
               </p>
             </div>
 
             <div style={styles.topActions}>
               {user?.googleBusinessConnected ? (
-                <button
-                  onClick={handleImportPortfolio}
-                  disabled={importing}
-                  style={styles.buttonPrimary}
-                >
-                  {importing ? "Importando..." : "Atualizar importação"}
-                </button>
+                <>
+                  <button onClick={handleImportPortfolio} disabled={importing} style={styles.buttonPrimary}>
+                    {importing ? "Importando..." : "Atualizar importação"}
+                  </button>
+
+                  <button onClick={handleVerificationSync} style={styles.buttonMuted}>
+                    Sincronizar verificação real
+                  </button>
+                </>
               ) : (
                 <a href="/api/auth/google-business-connect" style={styles.buttonPrimary}>
                   Conectar Google Business Profile
@@ -794,17 +804,17 @@ function App() {
           </div>
 
           <div style={styles.statCard}>
-            <div style={styles.statLabel}>Oportunidades altas</div>
-            <p style={styles.statValue}>{stats.highOpportunity}</p>
-            <div style={styles.statSub}>leads ou perfis com potencial claro</div>
+            <div style={styles.statLabel}>Confirmação real</div>
+            <p style={styles.statValue}>{stats.verifiedProfiles}</p>
+            <div style={styles.statSub}>perfis com confirmação forte de autoridade</div>
           </div>
         </div>
 
         <div style={{ ...styles.surface, ...styles.section }}>
           <div style={styles.sectionTitleRow}>
             <div>
-              <h2 style={styles.sectionTitle}>Usuário autenticado</h2>
-              <p style={styles.sectionHint}>Status da conexão e das integrações</p>
+              <h2 style={styles.sectionTitle}>Status operacional</h2>
+              <p style={styles.sectionHint}>Conexões e disponibilidade dos módulos</p>
             </div>
           </div>
 
@@ -814,24 +824,19 @@ function App() {
             ) : null}
 
             <div style={{ flex: 1, minWidth: 260 }}>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>
-                {user?.name || "Usuário"}
-              </div>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>{user?.name || "Usuário"}</div>
               <div style={{ color: "#6b7280", marginTop: 4 }}>{user?.email}</div>
 
               <div style={styles.chipRow}>
                 <span style={styles.chipSuccess}>Google conectado</span>
-
                 {user?.googleBusinessConnected ? (
-                  <span style={styles.chipSuccess}>Google Business conectado</span>
+                  <span style={styles.chipSuccess}>GBP conectado</span>
                 ) : (
-                  <span style={styles.chipDanger}>Google Business não conectado</span>
+                  <span style={styles.chipDanger}>GBP não conectado</span>
                 )}
 
                 {systemStatus?.aiConfigured ? (
-                  <span style={styles.chipSuccess}>
-                    IA ativa ({systemStatus.geminiModel || "Gemini"})
-                  </span>
+                  <span style={styles.chipSuccess}>IA ativa</span>
                 ) : (
                   <span style={styles.chipWarn}>IA não configurada</span>
                 )}
@@ -839,7 +844,7 @@ function App() {
             </div>
           </div>
 
-          {googleBusinessMissing ? (
+          {googleBusinessMissing && (
             <div
               style={{
                 marginTop: 16,
@@ -850,21 +855,12 @@ function App() {
                 color: "#9a3412"
               }}
             >
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>
-                Falta conectar o Google Business Profile
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                Seu login atual voltou só com escopos básicos do Google. Sem o escopo
-                <code> business.manage </code>
-                a ferramenta não consegue puxar contas e perfis.
-              </div>
-              <a href="/api/auth/google-business-connect" style={styles.buttonPrimary}>
-                Conectar Google Business Profile agora
-              </a>
+              Seu login atual voltou sem o escopo <code>business.manage</code>. Reconecte o Google
+              Business Profile para importar contas e perfis.
             </div>
-          ) : null}
+          )}
 
-          {!systemStatus?.aiConfigured ? (
+          {!systemStatus?.aiConfigured && (
             <div
               style={{
                 marginTop: 16,
@@ -875,15 +871,24 @@ function App() {
                 color: "#1d4ed8"
               }}
             >
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>
-                IA ainda não configurada
-              </div>
-              <div>
-                Crie a variável <code>GEMINI_API_KEY</code> no Railway para liberar as análises
-                automáticas com Gemini.
-              </div>
+              Crie a variável <code>GEMINI_API_KEY</code> no Railway para liberar a análise com IA.
             </div>
-          ) : null}
+          )}
+
+          {verificationResult && (
+            <div
+              style={{
+                marginTop: 16,
+                padding: 16,
+                borderRadius: 14,
+                background: "#ecfeff",
+                border: "1px solid #a5f3fc",
+                color: "#155e75"
+              }}
+            >
+              Sincronização concluída: {verificationResult.synced}/{verificationResult.totalLocations} localizações consultadas, {verificationResult.confirmed} com confirmação forte.
+            </div>
+          )}
 
           {importError && (
             <div style={{ marginTop: 16, color: "#b91c1c", fontWeight: 700 }}>
@@ -892,19 +897,17 @@ function App() {
           )}
         </div>
 
-        {!googleBusinessMissing && activeAccount ? (
-          <div style={{ marginTop: 18 }}>
-            <AccountDashboard account={activeAccount} businesses={activeAccountBusinesses} />
-          </div>
-        ) : null}
-
         {!googleBusinessMissing && (
           <>
+            <div style={{ marginTop: 18 }}>
+              <AccountDashboard account={activeAccount} businesses={activeAccount ? activeAccountBusinesses : businesses} />
+            </div>
+
             <div style={{ ...styles.surface, ...styles.section, marginTop: 18 }}>
               <div style={styles.sectionTitleRow}>
                 <div>
                   <h2 style={styles.sectionTitle}>Contas importadas</h2>
-                  <p style={styles.sectionHint}>Clique numa conta para abrir o dashboard dela</p>
+                  <p style={styles.sectionHint}>Clique numa conta para abrir o workspace dela</p>
                 </div>
 
                 <div style={styles.controlsRow}>
@@ -923,8 +926,7 @@ function App() {
                     <option value="all">Todas as contas</option>
                     {accounts.map((account) => (
                       <option key={account.id} value={account.accountId}>
-                        {(account.accountDisplayName || account.accountId) +
-                          ` (${account.locationsCount})`}
+                        {(account.accountDisplayName || account.accountId) + ` (${account.locationsCount})`}
                       </option>
                     ))}
                   </select>
@@ -948,12 +950,19 @@ function App() {
               ) : accountsError ? (
                 <div style={{ ...styles.empty, color: "#b91c1c" }}>{accountsError}</div>
               ) : accounts.length === 0 ? (
-                <div style={styles.empty}>
-                  Nenhuma conta carregada ainda. Faça a conexão do Google Business e rode a
-                  importação.
-                </div>
+                <div style={styles.empty}>Nenhuma conta carregada ainda.</div>
               ) : (
                 <div style={styles.accountsGrid}>
+                  <div
+                    style={styles.accountCard}
+                    onClick={() => setActiveAccount(null)}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: 16 }}>Visão geral</div>
+                    <div style={styles.chipRow}>
+                      <span style={styles.chipSuccess}>{businesses.length} perfis</span>
+                    </div>
+                  </div>
+
                   {accounts.map((account) => (
                     <div
                       key={account.id}
@@ -966,9 +975,7 @@ function App() {
 
                       <div style={styles.chipRow}>
                         <span style={styles.chip}>{account.accountType || "N/A"}</span>
-                        <span style={styles.chipSuccess}>
-                          {account.locationsCount} perfil(is)
-                        </span>
+                        <span style={styles.chipSuccess}>{account.locationsCount} perfil(is)</span>
                       </div>
 
                       <div style={{ marginTop: 12, color: "#6b7280", fontSize: 13 }}>
@@ -985,9 +992,7 @@ function App() {
               <div style={styles.sectionTitleRow}>
                 <div>
                   <h2 style={styles.sectionTitle}>Perfis importados</h2>
-                  <p style={styles.sectionHint}>
-                    {filteredBusinesses.length} perfil(is) exibido(s)
-                  </p>
+                  <p style={styles.sectionHint}>{filteredBusinesses.length} perfil(is) exibido(s)</p>
                 </div>
               </div>
 
@@ -1026,11 +1031,10 @@ function App() {
                                 Oportunidade {business.opportunityLevel}
                               </span>
 
-                              {business.location?.isVerified ||
-                              business.location?.verificationState === "VERIFIED" ? (
-                                <span style={styles.chipSuccess}>Verificado</span>
+                              {business.effectiveVerified ? (
+                                <span style={styles.chipSuccess}>Confirmado</span>
                               ) : (
-                                <span style={styles.chipDanger}>Não verificado</span>
+                                <span style={styles.chipDanger}>Sem confirmação forte</span>
                               )}
                             </div>
                           </div>
@@ -1049,9 +1053,7 @@ function App() {
                         <div style={styles.metaGrid}>
                           <div style={styles.metaItem}>
                             <span style={styles.metaLabel}>Conta</span>
-                            {compactText(
-                              business.account?.accountDisplayName || business.account?.accountId
-                            )}
+                            {compactText(business.account?.accountDisplayName || business.account?.accountId)}
                           </div>
 
                           <div style={styles.metaItem}>
@@ -1061,14 +1063,28 @@ function App() {
 
                           <div style={styles.metaItem}>
                             <span style={styles.metaLabel}>Cidade / UF</span>
-                            {compactText(
-                              [business.city, business.state].filter(Boolean).join(" / ")
+                            {compactText([business.city, business.state].filter(Boolean).join(" / "))}
+                          </div>
+
+                          <div style={styles.metaItem}>
+                            <span style={styles.metaLabel}>Website</span>
+                            {business.website ? (
+                              <a href={business.website} target="_blank" rel="noreferrer">
+                                Abrir site
+                              </a>
+                            ) : (
+                              "N/A"
                             )}
                           </div>
 
                           <div style={styles.metaItem}>
-                            <span style={styles.metaLabel}>Telefone</span>
-                            {compactText(business.phone)}
+                            <span style={styles.metaLabel}>Fonte verificação</span>
+                            {compactText(business.location?.verificationSource)}
+                          </div>
+
+                          <div style={styles.metaItem}>
+                            <span style={styles.metaLabel}>Voice of Merchant</span>
+                            {business.location?.hasVoiceOfMerchant ? "Sim" : "Não"}
                           </div>
                         </div>
 
@@ -1088,9 +1104,7 @@ function App() {
                           <button
                             style={styles.buttonMuted}
                             disabled={busyBusinessId === business.id}
-                            onClick={() =>
-                              handleClassification(business.id, "client", business.notes)
-                            }
+                            onClick={() => handleClassification(business.id, "client", business.notes)}
                           >
                             Marcar cliente
                           </button>
@@ -1098,9 +1112,7 @@ function App() {
                           <button
                             style={styles.buttonMuted}
                             disabled={busyBusinessId === business.id}
-                            onClick={() =>
-                              handleClassification(business.id, "prospect", business.notes)
-                            }
+                            onClick={() => handleClassification(business.id, "prospect", business.notes)}
                           >
                             Marcar prospect
                           </button>
@@ -1108,9 +1120,7 @@ function App() {
                           <button
                             style={styles.buttonMuted}
                             disabled={busyBusinessId === business.id}
-                            onClick={() =>
-                              handleClassification(business.id, "ignore", business.notes)
-                            }
+                            onClick={() => handleClassification(business.id, "ignore", business.notes)}
                           >
                             Ignorar
                           </button>
