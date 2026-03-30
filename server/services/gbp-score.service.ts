@@ -1,3 +1,5 @@
+import { computeEffectiveVerification } from "../google/verification.service";
+
 export type GbpScoredBusinessInput = {
   name: string;
   primaryCategory: string | null;
@@ -9,6 +11,8 @@ export type GbpScoredBusinessInput = {
   location: {
     isVerified: boolean;
     verificationState: string | null;
+    hasVoiceOfMerchant?: boolean;
+    hasBusinessAuthority?: boolean;
   } | null;
 };
 
@@ -16,6 +20,7 @@ export type GbpScoreResult = {
   score: number;
   opportunityScore: number;
   opportunityLevel: "baixa" | "media" | "alta";
+  effectiveVerified: boolean;
   insights: string[];
   priorities: string[];
   breakdown: {
@@ -46,9 +51,12 @@ export function calculateGbpScore(
     consistencyBonus: 0
   };
 
-  const isVerified =
-    Boolean(business.location?.isVerified) ||
-    business.location?.verificationState === "VERIFIED";
+  const effectiveVerified = computeEffectiveVerification({
+    isVerified: Boolean(business.location?.isVerified),
+    verificationState: business.location?.verificationState ?? null,
+    hasVoiceOfMerchant: Boolean(business.location?.hasVoiceOfMerchant),
+    hasBusinessAuthority: Boolean(business.location?.hasBusinessAuthority)
+  });
 
   if (business.name?.trim()) {
     breakdown.name = 10;
@@ -90,12 +98,12 @@ export function calculateGbpScore(
     priorities.push("Revisar localização e consistência geográfica");
   }
 
-  if (isVerified) {
+  if (effectiveVerified) {
     breakdown.verification = 30;
     score += breakdown.verification;
   } else {
-    insights.push("Perfil não verificado no Google");
-    priorities.push("Solicitar ou concluir a verificação do perfil");
+    insights.push("Perfil sem confirmação forte de verificação/autoridade");
+    priorities.push("Validar a autoridade do perfil no Google");
   }
 
   if (
@@ -114,7 +122,7 @@ export function calculateGbpScore(
 
   let opportunityScore = 0;
 
-  if (!isVerified) opportunityScore += 35;
+  if (!effectiveVerified) opportunityScore += 35;
   if (!business.website?.trim()) opportunityScore += 20;
   if (!business.phone?.trim()) opportunityScore += 10;
   if (!business.primaryCategory?.trim()) opportunityScore += 20;
@@ -131,6 +139,7 @@ export function calculateGbpScore(
     score,
     opportunityScore,
     opportunityLevel,
+    effectiveVerified,
     insights,
     priorities,
     breakdown
