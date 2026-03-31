@@ -10,7 +10,7 @@ const PORT = Number(process.env.PORT || 8080);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const publicPath = path.join(__dirname, "public");
+const publicPath = path.resolve(process.cwd(), "dist/public");
 const indexHtmlPath = path.join(publicPath, "index.html");
 
 app.use(cookieParser());
@@ -43,4 +43,5 @@ if (existsSync(indexHtmlPath)) {
 app.listen(PORT, async () => {
   console.log(`✅ GBP Analyzer ativo na porta ${PORT}`);
   console.log(`   NODE_ENV: ${process.env.NODE_ENV || "development"}`);
+  console.log(`   publicPath: ${publicPath}`);
 });
