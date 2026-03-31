@@ -1,48 +1,60 @@
-import { eq } from "drizzle-orm";
-import { db } from "../db";
-import { gbpLocations } from "../../drizzle/schema";
-import { getValidGoogleAccessToken } from "./google-connection.service";
-import { getVoiceOfMerchantState } from "../google/verification.service";
+export type VoiceOfMerchantState = {
+  hasVoiceOfMerchant?: boolean;
+  hasBusinessAuthority?: boolean;
+  waitForVoiceOfMerchant?: unknown;
+  verify?: unknown;
+  resolveOwnershipConflict?: unknown;
+  complyWithGuidelines?: unknown;
+};
 
-export async function syncVerificationForUser(userId: number) {
-  const { accessToken } = await getValidGoogleAccessToken(userId);
+function authHeaders(accessToken: string) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json"
+  };
+}
 
-  const locations = await db.query.gbpLocations.findMany({
-    where: eq(gbpLocations.userId, userId)
+export async function getVoiceOfMerchantState(
+  accessToken: string,
+  locationId: string
+): Promise<VoiceOfMerchantState | null> {
+  const url = `https://mybusinessverifications.googleapis.com/v1/locations/${locationId}:getVoiceOfMerchantState`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: authHeaders(accessToken)
   });
 
-  let synced = 0;
-  let confirmed = 0;
+  if (!response.ok) {
+    const errorText = await response.text();
 
-  for (const location of locations) {
-    const state = await getVoiceOfMerchantState(accessToken, location.locationId);
-
-    if (!state) {
-      continue;
+    if (
+      errorText.includes("PERMISSION_DENIED") ||
+      errorText.includes("not found") ||
+      errorText.includes("INVALID_ARGUMENT")
+    ) {
+      return null;
     }
 
-    await db
-      .update(gbpLocations)
-      .set({
-        hasVoiceOfMerchant: Boolean(state.hasVoiceOfMerchant),
-        hasBusinessAuthority: Boolean(state.hasBusinessAuthority),
-        verificationSource: "voice_of_merchant",
-        verificationJson: state,
-        lastVerificationSyncAt: new Date(),
-        updatedAt: new Date()
-      })
-      .where(eq(gbpLocations.id, location.id));
-
-    synced += 1;
-
-    if (state.hasVoiceOfMerchant || state.hasBusinessAuthority) {
-      confirmed += 1;
-    }
+    throw new Error(
+      `getVoiceOfMerchantState falhou para locationId=${locationId}: ${errorText}`
+    );
   }
 
-  return {
-    totalLocations: locations.length,
-    synced,
-    confirmed
-  };
+  const data = await response.json();
+  return data ?? null;
+}
+
+export function computeEffectiveVerification(input: {
+  isVerified: boolean;
+  verificationState: string | null;
+  hasVoiceOfMerchant: boolean;
+  hasBusinessAuthority: boolean;
+}) {
+  return (
+    input.isVerified ||
+    input.verificationState === "VERIFIED" ||
+    input.hasVoiceOfMerchant ||
+    input.hasBusinessAuthority
+  );
 }
