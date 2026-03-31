@@ -18,9 +18,13 @@ export async function syncVerificationForUser(userId: number) {
         })
         .where(eq(gbpLocations.id, location.id));
 
-      synced++;
-    } catch (err) {
-      console.error(err);
+      synced += 1;
+    } catch (error) {
+      console.error(
+        "Erro ao sincronizar verificação da location:",
+        location.locationId,
+        error
+      );
     }
   }
 
