@@ -4,15 +4,10 @@ providers = ["node"]
 nixPkgs = ["nodejs_22", "nodePackages.pnpm"]
 
 [phases.install]
-cmds = [
-  "pnpm install --no-frozen-lockfile"
-]
+cmds = ["pnpm install --no-frozen-lockfile"]
 
 [phases.build]
-cmds = [
-  "node --version",
-  "pnpm build"
-]
+cmds = ["pnpm build"]
 
 [start]
 cmd = "pnpm db:push && node dist/index.js"
