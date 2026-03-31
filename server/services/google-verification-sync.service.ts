@@ -14,7 +14,8 @@ export async function syncVerificationForUser(userId: number) {
 
   for (const location of locations) {
     try {
-      // TEMPORÁRIO (pra não quebrar build)
+      void accessToken;
+
       await db
         .update(gbpLocations)
         .set({
@@ -22,9 +23,13 @@ export async function syncVerificationForUser(userId: number) {
         })
         .where(eq(gbpLocations.id, location.id));
 
-      synced++;
-    } catch (err) {
-      console.error("Erro:", err);
+      synced += 1;
+    } catch (error) {
+      console.error(
+        "Erro ao sincronizar verificação da location:",
+        location.locationId,
+        error
+      );
     }
   }
 
