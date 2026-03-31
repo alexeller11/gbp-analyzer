@@ -5,7 +5,7 @@ function App() {
   return (
     <div style={{ padding: 40, fontFamily: "Arial, sans-serif" }}>
       <h1>GBP Analyzer Online</h1>
-      <p>Build estabilizado com sucesso.</p>
+      <p>Servidor e front renderizados com sucesso.</p>
     </div>
   );
 }
