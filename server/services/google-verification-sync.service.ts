@@ -1,11 +1,8 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { gbpLocations } from "../../drizzle/schema";
-import { getValidGoogleAccessToken } from "./google-connection.service";
 
 export async function syncVerificationForUser(userId: number) {
-  const { accessToken } = await getValidGoogleAccessToken(userId);
-
   const locations = await db.query.gbpLocations.findMany({
     where: eq(gbpLocations.userId, userId)
   });
@@ -14,8 +11,6 @@ export async function syncVerificationForUser(userId: number) {
 
   for (const location of locations) {
     try {
-      void accessToken;
-
       await db
         .update(gbpLocations)
         .set({
@@ -23,13 +18,9 @@ export async function syncVerificationForUser(userId: number) {
         })
         .where(eq(gbpLocations.id, location.id));
 
-      synced += 1;
-    } catch (error) {
-      console.error(
-        "Erro ao sincronizar verificação da location:",
-        location.locationId,
-        error
-      );
+      synced++;
+    } catch (err) {
+      console.error(err);
     }
   }
 
