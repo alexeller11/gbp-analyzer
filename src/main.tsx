@@ -14,25 +14,48 @@ type MeResponse = {
   };
 };
 
-type GbpAccountsResponse = {
-  ok?: boolean;
-  accounts?: Array<{
+type GbpAccount = {
+  id: number;
+  accountId: string;
+  accountDisplayName: string | null;
+  accountType: string | null;
+  googleAccountName: string;
+};
+
+type GbpLocation = {
+  id: number;
+  title: string;
+  locationId: string;
+  googleLocationName: string;
+  verificationState: string | null;
+  isVerified: boolean;
+  account: {
     id: number;
     accountId: string;
     accountDisplayName: string | null;
     accountType: string | null;
-    googleAccountName: string;
-  }>;
-  error?: string;
+  } | null;
+  business: {
+    id: number;
+    name: string;
+    primaryCategory: string | null;
+    city: string | null;
+    state: string | null;
+    phone: string | null;
+    website: string | null;
+  } | null;
 };
 
 function App() {
   const [loading, setLoading] = React.useState(true);
   const [me, setMe] = React.useState<MeResponse | null>(null);
-  const [accounts, setAccounts] = React.useState<GbpAccountsResponse["accounts"]>([]);
-  const [importing, setImporting] = React.useState(false);
+  const [accounts, setAccounts] = React.useState<GbpAccount[]>([]);
+  const [locations, setLocations] = React.useState<GbpLocation[]>([]);
+  const [importingAccounts, setImportingAccounts] = React.useState(false);
+  const [importingLocations, setImportingLocations] = React.useState(false);
   const [accountsLoading, setAccountsLoading] = React.useState(false);
-  const [message, setMessage] = React.useState<string>("");
+  const [locationsLoading, setLocationsLoading] = React.useState(false);
+  const [message, setMessage] = React.useState("");
 
   async function loadMe() {
     const res = await fetch("/api/auth/me", {
@@ -52,15 +75,25 @@ function App() {
         credentials: "include"
       });
 
-      const data: GbpAccountsResponse = await res.json();
-
-      if (res.ok && Array.isArray(data.accounts)) {
-        setAccounts(data.accounts);
-      } else {
-        setAccounts([]);
-      }
+      const data = await res.json();
+      setAccounts(Array.isArray(data.accounts) ? data.accounts : []);
     } finally {
       setAccountsLoading(false);
+    }
+  }
+
+  async function loadLocations() {
+    setLocationsLoading(true);
+
+    try {
+      const res = await fetch("/api/gbp/locations", {
+        credentials: "include"
+      });
+
+      const data = await res.json();
+      setLocations(Array.isArray(data.locations) ? data.locations : []);
+    } finally {
+      setLocationsLoading(false);
     }
   }
 
@@ -69,6 +102,7 @@ function App() {
       .then((data) => {
         if (data?.authenticated) {
           loadAccounts();
+          loadLocations();
         }
       })
       .finally(() => setLoading(false));
@@ -84,7 +118,7 @@ function App() {
   }
 
   async function handleImportAccounts() {
-    setImporting(true);
+    setImportingAccounts(true);
     setMessage("");
 
     try {
@@ -101,12 +135,39 @@ function App() {
       }
 
       setMessage(
-        `Importação concluída. ${data.result?.imported ?? 0} novas contas importadas.`
+        `Importação de contas concluída. ${data.result?.imported ?? 0} novas contas importadas.`
       );
 
       await loadAccounts();
     } finally {
-      setImporting(false);
+      setImportingAccounts(false);
+    }
+  }
+
+  async function handleImportLocations() {
+    setImportingLocations(true);
+    setMessage("");
+
+    try {
+      const res = await fetch("/api/gbp/import-locations", {
+        method: "POST",
+        credentials: "include"
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessage(data?.error || "Erro ao importar perfis");
+        return;
+      }
+
+      setMessage(
+        `Importação de perfis concluída. ${data.result?.locationsImported ?? 0} novos perfis importados.`
+      );
+
+      await loadLocations();
+    } finally {
+      setImportingLocations(false);
     }
   }
 
@@ -163,25 +224,17 @@ function App() {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
           <button
             onClick={handleImportAccounts}
-            disabled={importing || !me.user?.googleBusinessConnected}
+            disabled={importingAccounts || !me.user?.googleBusinessConnected}
           >
-            {importing ? "Importando..." : "Importar contas GBP"}
+            {importingAccounts ? "Importando contas..." : "Importar contas GBP"}
           </button>
 
           <button onClick={loadAccounts} disabled={accountsLoading}>
-            {accountsLoading ? "Carregando..." : "Atualizar lista"}
+            {accountsLoading ? "Carregando..." : "Atualizar contas"}
           </button>
         </div>
 
-        {!me.user?.googleBusinessConnected ? (
-          <p>Conecte o Google Business Profile antes de importar as contas.</p>
-        ) : null}
-
-        {message ? <p>{message}</p> : null}
-
-        {accountsLoading ? (
-          <p>Carregando contas...</p>
-        ) : accounts && accounts.length > 0 ? (
+        {accounts.length > 0 ? (
           <pre
             style={{
               background: "#f5f5f5",
@@ -194,6 +247,41 @@ function App() {
           </pre>
         ) : (
           <p>Nenhuma conta importada ainda.</p>
+        )}
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <h2>Perfis / Locations</h2>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+          <button
+            onClick={handleImportLocations}
+            disabled={importingLocations || !me.user?.googleBusinessConnected}
+          >
+            {importingLocations ? "Importando perfis..." : "Importar todos os perfis"}
+          </button>
+
+          <button onClick={loadLocations} disabled={locationsLoading}>
+            {locationsLoading ? "Carregando..." : "Atualizar perfis"}
+          </button>
+        </div>
+
+        {message ? <p>{message}</p> : null}
+
+        {locations.length > 0 ? (
+          <pre
+            style={{
+              background: "#f5f5f5",
+              padding: 16,
+              borderRadius: 8,
+              overflow: "auto",
+              maxHeight: 500
+            }}
+          >
+            {JSON.stringify(locations, null, 2)}
+          </pre>
+        ) : (
+          <p>Nenhum perfil importado ainda.</p>
         )}
       </div>
     </div>
