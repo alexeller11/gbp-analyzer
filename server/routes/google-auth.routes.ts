@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { eq } from "drizzle-orm";
-import { db } from "../db";
-import { users, googleConnections } from "../../drizzle/schema";
-import { createSessionToken, verifySessionToken } from "../auth/session";
+import { db } from "../db.ts";
+import { users, googleConnections } from "../../drizzle/schema.ts";
+import { createSessionToken, verifySessionToken } from "../auth/session.ts";
 
 const router = Router();
 
