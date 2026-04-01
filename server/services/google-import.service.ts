@@ -49,6 +49,51 @@ function parseWebsite(profile: any) {
   return profile?.websiteUri ? String(profile.websiteUri) : null;
 }
 
+async function fetchAllLocationsForAccount(accessToken: string, googleAccountName: string) {
+  const readMask =
+    "name,title,storeCode,languageCode,websiteUri,phoneNumbers,storefrontAddress,primaryCategory,metadata";
+
+  let nextPageToken = "";
+  const allLocations: any[] = [];
+
+  do {
+    const url = new URL(
+      `https://mybusinessbusinessinformation.googleapis.com/v1/${googleAccountName}/locations`
+    );
+    url.searchParams.set("readMask", readMask);
+    url.searchParams.set("pageSize", "100");
+
+    if (nextPageToken) {
+      url.searchParams.set("pageToken", nextPageToken);
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        error: data,
+        locations: [] as any[]
+      };
+    }
+
+    const locations = Array.isArray(data.locations) ? data.locations : [];
+    allLocations.push(...locations);
+    nextPageToken = data.nextPageToken ? String(data.nextPageToken) : "";
+  } while (nextPageToken);
+
+  return {
+    ok: true as const,
+    locations: allLocations
+  };
+}
+
 export async function importGoogleBusinessAccounts(userId: number) {
   const { accessToken, connection } = await getValidGoogleAccessToken(userId);
 
@@ -138,26 +183,45 @@ export async function importGoogleBusinessLocations(userId: number) {
   let locationsImported = 0;
   let businessesImported = 0;
   const collected: any[] = [];
+  const accountDiagnostics: any[] = [];
 
   for (const account of accounts) {
     accountsProcessed += 1;
 
-    const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${account.googleAccountName}/locations?readMask=name,title,storeCode,languageCode,websiteUri,phoneNumbers,storefrontAddress,primaryCategory,metadata`;
+    const result = await fetchAllLocationsForAccount(
+      accessToken,
+      account.googleAccountName
+    );
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    });
+    if (!result.ok) {
+      console.error(
+        `Erro ao buscar locations da conta ${account.googleAccountName}:`,
+        result.error
+      );
 
-    const data = await response.json();
+      accountDiagnostics.push({
+        accountId: account.accountId,
+        accountDisplayName: account.accountDisplayName,
+        accountType: account.accountType,
+        googleAccountName: account.googleAccountName,
+        locationsFound: 0,
+        status: "error",
+        error: result.error
+      });
 
-    if (!response.ok) {
-      console.error(`Erro ao buscar locations da conta ${account.googleAccountName}:`, data);
       continue;
     }
 
-    const locations = Array.isArray(data.locations) ? data.locations : [];
+    const locations = result.locations;
+
+    accountDiagnostics.push({
+      accountId: account.accountId,
+      accountDisplayName: account.accountDisplayName,
+      accountType: account.accountType,
+      googleAccountName: account.googleAccountName,
+      locationsFound: locations.length,
+      status: "ok"
+    });
 
     for (const profile of locations) {
       const googleLocationName = String(profile.name || "");
@@ -283,6 +347,7 @@ export async function importGoogleBusinessLocations(userId: number) {
     locationsImported,
     businessesImported,
     totalCollected: collected.length,
-    sample: collected.slice(0, 20)
+    sample: collected.slice(0, 20),
+    diagnostics: accountDiagnostics
   };
 }
