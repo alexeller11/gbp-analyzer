@@ -56,6 +56,7 @@ function App() {
   const [accountsLoading, setAccountsLoading] = React.useState(false);
   const [locationsLoading, setLocationsLoading] = React.useState(false);
   const [message, setMessage] = React.useState("");
+  const [lastImportResult, setLastImportResult] = React.useState<any>(null);
 
   async function loadMe() {
     const res = await fetch("/api/auth/me", {
@@ -120,6 +121,7 @@ function App() {
   async function handleImportAccounts() {
     setImportingAccounts(true);
     setMessage("");
+    setLastImportResult(null);
 
     try {
       const res = await fetch("/api/gbp/import", {
@@ -134,6 +136,7 @@ function App() {
         return;
       }
 
+      setLastImportResult(data.result);
       setMessage(
         `Importação de contas concluída. ${data.result?.imported ?? 0} novas contas importadas.`
       );
@@ -147,6 +150,7 @@ function App() {
   async function handleImportLocations() {
     setImportingLocations(true);
     setMessage("");
+    setLastImportResult(null);
 
     try {
       const res = await fetch("/api/gbp/import-locations", {
@@ -161,6 +165,7 @@ function App() {
         return;
       }
 
+      setLastImportResult(data.result);
       setMessage(
         `Importação de perfis concluída. ${data.result?.locationsImported ?? 0} novos perfis importados.`
       );
@@ -267,6 +272,20 @@ function App() {
         </div>
 
         {message ? <p>{message}</p> : null}
+
+        {lastImportResult ? (
+          <pre
+            style={{
+              background: "#eef6ff",
+              padding: 16,
+              borderRadius: 8,
+              overflow: "auto",
+              maxHeight: 400
+            }}
+          >
+            {JSON.stringify(lastImportResult, null, 2)}
+          </pre>
+        ) : null}
 
         {locations.length > 0 ? (
           <pre
