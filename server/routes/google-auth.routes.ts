@@ -108,8 +108,7 @@ router.get("/api/auth/google/callback", async (req, res) => {
     }
 
     const accessToken = String(tokenData.access_token || "");
-    const refreshToken =
-      tokenData.refresh_token ? String(tokenData.refresh_token) : null;
+    const refreshToken = tokenData.refresh_token ? String(tokenData.refresh_token) : null;
     const expiresIn = Number(tokenData.expires_in || 0);
     const scope = String(tokenData.scope || "");
 
@@ -164,8 +163,7 @@ router.get("/api/auth/google/callback", async (req, res) => {
     }
 
     const googleBusinessConnected = scope.includes("business.manage");
-    const expiresAt =
-      expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000) : null;
+    const expiresAt = expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000) : null;
 
     const existingConnection = await db.query.googleConnections.findFirst({
       where: eq(googleConnections.userId, user.id)
