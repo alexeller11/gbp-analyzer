@@ -8,14 +8,13 @@
   },
   "scripts": {
     "dev": "tsx watch server/_core/index.ts",
-    "build": "vite build && mkdir -p dist/server/_core && cp server/_core/index.ts dist/server/_core/index.ts",
+    "build": "vite build && mkdir -p dist/server/_core dist/server/routes dist/server/auth dist/drizzle && cp server/_core/index.ts dist/server/_core/index.ts && cp server/db.ts dist/server/db.ts && cp server/routes/google-auth.routes.ts dist/server/routes/google-auth.routes.ts && cp server/auth/session.ts dist/server/auth/session.ts && cp drizzle/schema.ts dist/drizzle/schema.ts",
     "start": "node dist/server/_core/index.ts",
     "db:push": "drizzle-kit push --force"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.2.0",
     "cookie-parser": "^1.4.7",
-    "dotenv": "^17.3.1",
     "drizzle-orm": "^0.44.7",
     "express": "^4.22.1",
     "jose": "^6.2.2",
