@@ -1,9 +1,12 @@
 import { Router } from "express";
 import { eq, asc } from "drizzle-orm";
 import { db } from "../db.ts";
-import { gbpAccounts } from "../../drizzle/schema.ts";
+import { gbpAccounts, gbpLocations, businesses } from "../../drizzle/schema.ts";
 import { verifySessionToken } from "../auth/session.ts";
-import { importGoogleBusinessAccounts } from "../services/google-import.service.ts";
+import {
+  importGoogleBusinessAccounts,
+  importGoogleBusinessLocations
+} from "../services/google-import.service.ts";
 
 const router = Router();
 
@@ -56,6 +59,24 @@ router.post("/api/gbp/import", async (req, res) => {
   }
 });
 
+router.post("/api/gbp/import-locations", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const result = await importGoogleBusinessLocations(userId);
+
+    return res.status(200).json({
+      ok: true,
+      result
+    });
+  } catch (error: any) {
+    console.error("Erro ao importar locations GBP:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao importar locations GBP"
+    });
+  }
+});
+
 router.get("/api/gbp/accounts", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
@@ -82,6 +103,65 @@ router.get("/api/gbp/accounts", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message || "Erro ao listar contas GBP"
+    });
+  }
+});
+
+router.get("/api/gbp/locations", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+
+    const locations = await db.query.gbpLocations.findMany({
+      where: eq(gbpLocations.userId, userId),
+      orderBy: [asc(gbpLocations.title)]
+    });
+
+    const allBusinesses = await db.query.businesses.findMany({
+      where: eq(businesses.userId, userId)
+    });
+
+    const allAccounts = await db.query.gbpAccounts.findMany({
+      where: eq(gbpAccounts.userId, userId)
+    });
+
+    const businessMap = new Map(allBusinesses.map((item) => [item.id, item]));
+    const accountMap = new Map(allAccounts.map((item) => [item.id, item]));
+
+    return res.status(200).json({
+      ok: true,
+      locations: locations.map((location) => ({
+        id: location.id,
+        title: location.title,
+        locationId: location.locationId,
+        googleLocationName: location.googleLocationName,
+        verificationState: location.verificationState,
+        isVerified: location.isVerified,
+        account: accountMap.get(location.gbpAccountId)
+          ? {
+              id: accountMap.get(location.gbpAccountId)!.id,
+              accountId: accountMap.get(location.gbpAccountId)!.accountId,
+              accountDisplayName: accountMap.get(location.gbpAccountId)!.accountDisplayName,
+              accountType: accountMap.get(location.gbpAccountId)!.accountType
+            }
+          : null,
+        business: businessMap.get(location.businessId)
+          ? {
+              id: businessMap.get(location.businessId)!.id,
+              name: businessMap.get(location.businessId)!.name,
+              primaryCategory: businessMap.get(location.businessId)!.primaryCategory,
+              city: businessMap.get(location.businessId)!.city,
+              state: businessMap.get(location.businessId)!.state,
+              phone: businessMap.get(location.businessId)!.phone,
+              website: businessMap.get(location.businessId)!.website
+            }
+          : null
+      }))
+    });
+  } catch (error: any) {
+    console.error("Erro ao listar locations GBP:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao listar locations GBP"
     });
   }
 });
