@@ -1,190 +1,84 @@
 import { eq } from "drizzle-orm";
-import { db } from "../db";
-import {
-  gbpAccounts,
-  businesses,
-  gbpLocations
-} from "../../drizzle/schema";
-import { getValidGoogleAccessToken } from "./google-connection.service";
-import {
-  discoverAllAccounts,
-  listLocations,
-  parseAccountId,
-  parseLocationId
-} from "../google/gbp.service";
+import { db } from "../db.ts";
+import { gbpAccounts } from "../../drizzle/schema.ts";
+import { getValidGoogleAccessToken } from "./google-connection.service.ts";
 
-export async function importGoogleBusinessPortfolio(userId: number) {
+function extractAccountId(name: string) {
+  const parts = name.split("/");
+  return parts[parts.length - 1] || name;
+}
+
+export async function importGoogleBusinessAccounts(userId: number) {
   const { accessToken, connection } = await getValidGoogleAccessToken(userId);
 
-  if (!connection.googleBusinessConnected) {
-    throw new Error("Google Business Profile ainda não está conectado");
+  const response = await fetch("https://mybusinessaccountmanagement.googleapis.com/v1/accounts", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error("Erro ao buscar contas GBP:", data);
+    throw new Error("Falha ao buscar contas do Google Business Profile");
   }
 
-  const accounts = await discoverAllAccounts(accessToken);
+  const accounts = Array.isArray(data.accounts) ? data.accounts : [];
 
-  const result = {
-    accountsImported: 0,
-    locationsImported: 0,
-    businessesImported: 0,
-    accountsDiscovered: accounts.length,
-    accounts: [] as Array<{
-      accountId: string;
-      accountName: string | null;
-      type: string | null;
-      locations: number;
-    }>
-  };
+  let imported = 0;
 
   for (const account of accounts) {
-    const accountId = parseAccountId(account.name);
+    const googleAccountName = String(account.name || "");
+    const accountId = extractAccountId(googleAccountName);
+    const accountDisplayName = account.accountName ? String(account.accountName) : null;
+    const accountType = account.type ? String(account.type) : null;
 
-    let dbAccount = await db.query.gbpAccounts.findFirst({
-      where: eq(gbpAccounts.googleAccountName, account.name)
+    const existing = await db.query.gbpAccounts.findFirst({
+      where: eq(gbpAccounts.googleAccountName, googleAccountName)
     });
 
-    if (!dbAccount) {
-      const [createdAccount] = await db
-        .insert(gbpAccounts)
-        .values({
-          userId,
-          googleConnectionId: connection.id,
-          googleAccountName: account.name,
-          accountId,
-          accountDisplayName: account.accountName ?? null,
-          accountType: account.type ?? null,
-          rawJson: account
-        })
-        .returning();
+    if (!existing) {
+      await db.insert(gbpAccounts).values({
+        userId,
+        googleConnectionId: connection.id,
+        googleAccountName,
+        accountId,
+        accountDisplayName,
+        accountType,
+        rawJson: account,
+        updatedAt: new Date()
+      });
 
-      dbAccount = createdAccount;
-      result.accountsImported++;
+      imported += 1;
     } else {
-      const [updatedAccount] = await db
+      await db
         .update(gbpAccounts)
         .set({
-          accountDisplayName: account.accountName ?? null,
-          accountType: account.type ?? null,
+          accountId,
+          accountDisplayName,
+          accountType,
           rawJson: account,
           updatedAt: new Date()
         })
-        .where(eq(gbpAccounts.id, dbAccount.id))
-        .returning();
-
-      dbAccount = updatedAccount;
-    }
-
-    const locations = await listLocations(accessToken, accountId);
-
-    result.accounts.push({
-      accountId,
-      accountName: account.accountName ?? null,
-      type: account.type ?? null,
-      locations: locations.length
-    });
-
-    for (const location of locations) {
-      const locationId = parseLocationId(location.name);
-      const city = location.storefrontAddress?.locality ?? null;
-      const state = location.storefrontAddress?.administrativeArea ?? null;
-      const phone = location.phoneNumbers?.primaryPhone ?? null;
-      const website = location.websiteUri ?? null;
-      const primaryCategory =
-        location.categories?.primaryCategory?.displayName ??
-        location.categories?.primaryCategory?.name ??
-        null;
-
-      let business = await db.query.businesses.findFirst({
-        where: eq(businesses.googleLocationKey, location.name)
-      });
-
-      if (!business) {
-        const [createdBusiness] = await db
-          .insert(businesses)
-          .values({
-            userId,
-            source: "google_import",
-            status: "active",
-            name: location.title,
-            primaryCategory,
-            city,
-            state,
-            phone,
-            website,
-            googleLocationKey: location.name
-          })
-          .returning();
-
-        business = createdBusiness;
-        result.businessesImported++;
-      } else {
-        const [updatedBusiness] = await db
-          .update(businesses)
-          .set({
-            name: location.title,
-            primaryCategory,
-            city,
-            state,
-            phone,
-            website,
-            updatedAt: new Date()
-          })
-          .where(eq(businesses.id, business.id))
-          .returning();
-
-        business = updatedBusiness;
-      }
-
-      const verificationState =
-        typeof location.metadata?.["verificationState"] === "string"
-          ? String(location.metadata["verificationState"])
-          : null;
-
-      const isVerified = verificationState === "VERIFIED";
-
-      const existingLocation = await db.query.gbpLocations.findFirst({
-        where: eq(gbpLocations.googleLocationName, location.name)
-      });
-
-      if (!existingLocation) {
-        await db
-          .insert(gbpLocations)
-          .values({
-            businessId: business.id,
-            userId,
-            gbpAccountId: dbAccount.id,
-            googleLocationName: location.name,
-            locationId,
-            title: location.title,
-            storeCode: location.storeCode ?? null,
-            languageCode: location.languageCode ?? null,
-            verificationState,
-            isVerified,
-            metadataJson: location.metadata ?? null,
-            profileJson: location.profile ?? null,
-            lastImportedAt: new Date()
-          });
-
-        result.locationsImported++;
-      } else {
-        await db
-          .update(gbpLocations)
-          .set({
-            businessId: business.id,
-            gbpAccountId: dbAccount.id,
-            title: location.title,
-            storeCode: location.storeCode ?? null,
-            languageCode: location.languageCode ?? null,
-            verificationState,
-            isVerified,
-            metadataJson: location.metadata ?? null,
-            profileJson: location.profile ?? null,
-            lastImportedAt: new Date(),
-            updatedAt: new Date()
-          })
-          .where(eq(gbpLocations.id, existingLocation.id));
-      }
+        .where(eq(gbpAccounts.id, existing.id));
     }
   }
 
-  return result;
+  const storedAccounts = await db.query.gbpAccounts.findMany({
+    where: eq(gbpAccounts.userId, userId)
+  });
+
+  return {
+    imported,
+    totalDiscovered: accounts.length,
+    totalStored: storedAccounts.length,
+    accounts: storedAccounts.map((item) => ({
+      id: item.id,
+      accountId: item.accountId,
+      accountDisplayName: item.accountDisplayName,
+      accountType: item.accountType,
+      googleAccountName: item.googleAccountName
+    }))
+  };
 }
