@@ -5,7 +5,6 @@ import {
   timestamp,
   integer,
   boolean,
-  jsonb,
   uniqueIndex,
   index
 } from "drizzle-orm/pg-core";
@@ -46,85 +45,5 @@ export const googleConnections = pgTable(
   (t) => ({
     googleUserIdIdx: uniqueIndex("google_connections_google_user_id_idx").on(t.googleUserId),
     userIdIdx: index("google_connections_user_id_idx").on(t.userId)
-  })
-);
-
-export const gbpAccounts = pgTable(
-  "gbp_accounts",
-  {
-    id: serial("id").primaryKey(),
-    userId: integer("user_id").notNull(),
-    googleConnectionId: integer("google_connection_id").notNull(),
-    googleAccountName: text("google_account_name").notNull(),
-    accountId: text("account_id").notNull(),
-    accountDisplayName: text("account_display_name"),
-    accountType: text("account_type"),
-    rawJson: jsonb("raw_json"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull()
-  },
-  (t) => ({
-    googleAccountNameIdx: uniqueIndex("gbp_accounts_google_account_name_idx").on(t.googleAccountName),
-    userIdIdx: index("gbp_accounts_user_id_idx").on(t.userId)
-  })
-);
-
-export const businesses = pgTable(
-  "businesses",
-  {
-    id: serial("id").primaryKey(),
-    userId: integer("user_id").notNull(),
-    source: text("source").default("google_import").notNull(),
-    status: text("status").default("active").notNull(),
-    name: text("name").notNull(),
-    primaryCategory: text("primary_category"),
-    city: text("city"),
-    state: text("state"),
-    phone: text("phone"),
-    website: text("website"),
-    googleLocationKey: text("google_location_key").notNull(),
-    portfolioType: text("portfolio_type").default("unclassified").notNull(),
-    notes: text("notes"),
-    aiSummaryJson: jsonb("ai_summary_json"),
-    lastAiAnalysisAt: timestamp("last_ai_analysis_at"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull()
-  },
-  (t) => ({
-    googleLocationKeyIdx: uniqueIndex("businesses_google_location_key_idx").on(t.googleLocationKey),
-    userIdIdx: index("businesses_user_id_idx").on(t.userId)
-  })
-);
-
-export const gbpLocations = pgTable(
-  "gbp_locations",
-  {
-    id: serial("id").primaryKey(),
-    businessId: integer("business_id").notNull(),
-    userId: integer("user_id").notNull(),
-    gbpAccountId: integer("gbp_account_id").notNull(),
-    googleLocationName: text("google_location_name").notNull(),
-    locationId: text("location_id").notNull(),
-    title: text("title").notNull(),
-    storeCode: text("store_code"),
-    languageCode: text("language_code"),
-    verificationState: text("verification_state"),
-    isVerified: boolean("is_verified").default(false).notNull(),
-    hasVoiceOfMerchant: boolean("has_voice_of_merchant").default(false).notNull(),
-    hasBusinessAuthority: boolean("has_business_authority").default(false).notNull(),
-    verificationSource: text("verification_source").default("business_information").notNull(),
-    metadataJson: jsonb("metadata_json"),
-    profileJson: jsonb("profile_json"),
-    verificationJson: jsonb("verification_json"),
-    lastImportedAt: timestamp("last_imported_at"),
-    lastSyncedAt: timestamp("last_synced_at"),
-    lastVerificationSyncAt: timestamp("last_verification_sync_at"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull()
-  },
-  (t) => ({
-    googleLocationNameIdx: uniqueIndex("gbp_locations_google_location_name_idx").on(t.googleLocationName),
-    businessIdIdx: index("gbp_locations_business_id_idx").on(t.businessId),
-    userIdIdx: index("gbp_locations_user_id_idx").on(t.userId)
   })
 );
