@@ -68,3 +68,54 @@ export const gbpAccounts = pgTable(
     userIdIdx: index("gbp_accounts_user_id_idx").on(t.userId)
   })
 );
+
+export const businesses = pgTable(
+  "businesses",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    source: text("source").default("google_import").notNull(),
+    status: text("status").default("active").notNull(),
+    name: text("name").notNull(),
+    primaryCategory: text("primary_category"),
+    city: text("city"),
+    state: text("state"),
+    phone: text("phone"),
+    website: text("website"),
+    googleLocationKey: text("google_location_key").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull()
+  },
+  (t) => ({
+    googleLocationKeyIdx: uniqueIndex("businesses_google_location_key_idx").on(t.googleLocationKey),
+    userIdIdx: index("businesses_user_id_idx").on(t.userId)
+  })
+);
+
+export const gbpLocations = pgTable(
+  "gbp_locations",
+  {
+    id: serial("id").primaryKey(),
+    businessId: integer("business_id").notNull(),
+    userId: integer("user_id").notNull(),
+    gbpAccountId: integer("gbp_account_id").notNull(),
+    googleLocationName: text("google_location_name").notNull(),
+    locationId: text("location_id").notNull(),
+    title: text("title").notNull(),
+    storeCode: text("store_code"),
+    languageCode: text("language_code"),
+    verificationState: text("verification_state"),
+    isVerified: boolean("is_verified").default(false).notNull(),
+    metadataJson: jsonb("metadata_json"),
+    profileJson: jsonb("profile_json"),
+    lastImportedAt: timestamp("last_imported_at"),
+    lastSyncedAt: timestamp("last_synced_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull()
+  },
+  (t) => ({
+    googleLocationNameIdx: uniqueIndex("gbp_locations_google_location_name_idx").on(t.googleLocationName),
+    businessIdIdx: index("gbp_locations_business_id_idx").on(t.businessId),
+    userIdIdx: index("gbp_locations_user_id_idx").on(t.userId)
+  })
+);
