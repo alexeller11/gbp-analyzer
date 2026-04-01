@@ -50,8 +50,16 @@ function parseWebsite(profile: any) {
 }
 
 async function fetchAllLocationsForAccount(accessToken: string, googleAccountName: string) {
-  const readMask =
-    "name,title,storeCode,languageCode,websiteUri,phoneNumbers,storefrontAddress,primaryCategory,metadata";
+  const safeReadMask = [
+    "name",
+    "title",
+    "storeCode",
+    "languageCode",
+    "websiteUri",
+    "phoneNumbers",
+    "storefrontAddress",
+    "primaryCategory"
+  ].join(",");
 
   let nextPageToken = "";
   const allLocations: any[] = [];
@@ -60,7 +68,7 @@ async function fetchAllLocationsForAccount(accessToken: string, googleAccountNam
     const url = new URL(
       `https://mybusinessbusinessinformation.googleapis.com/v1/${googleAccountName}/locations`
     );
-    url.searchParams.set("readMask", readMask);
+    url.searchParams.set("readMask", safeReadMask);
     url.searchParams.set("pageSize", "100");
 
     if (nextPageToken) {
@@ -233,12 +241,8 @@ export async function importGoogleBusinessLocations(userId: number) {
       const phone = parsePhone(profile);
       const website = parseWebsite(profile);
 
-      const metadata = profile.metadata || null;
-      const verificationState = metadata?.verification?.verificationState
-        ? String(metadata.verification.verificationState)
-        : null;
-
-      const isVerified = verificationState === "VERIFIED";
+      const verificationState = null;
+      const isVerified = false;
 
       let business = await db.query.businesses.findFirst({
         where: and(
@@ -304,7 +308,7 @@ export async function importGoogleBusinessLocations(userId: number) {
           languageCode: profile.languageCode ? String(profile.languageCode) : null,
           verificationState,
           isVerified,
-          metadataJson: metadata,
+          metadataJson: null,
           profileJson: profile,
           lastImportedAt: new Date(),
           lastSyncedAt: new Date(),
@@ -323,7 +327,7 @@ export async function importGoogleBusinessLocations(userId: number) {
             languageCode: profile.languageCode ? String(profile.languageCode) : null,
             verificationState,
             isVerified,
-            metadataJson: metadata,
+            metadataJson: null,
             profileJson: profile,
             lastImportedAt: new Date(),
             lastSyncedAt: new Date(),
@@ -336,8 +340,7 @@ export async function importGoogleBusinessLocations(userId: number) {
         accountId: account.accountId,
         accountDisplayName: account.accountDisplayName,
         locationId,
-        title,
-        verificationState
+        title
       });
     }
   }
