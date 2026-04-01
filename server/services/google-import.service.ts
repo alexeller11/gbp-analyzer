@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db.ts";
 import { gbpAccounts, businesses, gbpLocations } from "../../drizzle/schema.ts";
 import { getValidGoogleAccessToken } from "./google-connection.service.ts";
@@ -76,7 +76,10 @@ export async function importGoogleBusinessAccounts(userId: number) {
     const accountType = account.type ? String(account.type) : null;
 
     const existing = await db.query.gbpAccounts.findFirst({
-      where: eq(gbpAccounts.googleAccountName, googleAccountName)
+      where: and(
+        eq(gbpAccounts.userId, userId),
+        eq(gbpAccounts.googleAccountName, googleAccountName)
+      )
     });
 
     if (!existing) {
@@ -174,7 +177,10 @@ export async function importGoogleBusinessLocations(userId: number) {
       const isVerified = verificationState === "VERIFIED";
 
       let business = await db.query.businesses.findFirst({
-        where: eq(businesses.googleLocationKey, googleLocationName)
+        where: and(
+          eq(businesses.userId, userId),
+          eq(businesses.googleLocationKey, googleLocationName)
+        )
       });
 
       if (!business) {
@@ -216,7 +222,10 @@ export async function importGoogleBusinessLocations(userId: number) {
       }
 
       const existingLocation = await db.query.gbpLocations.findFirst({
-        where: eq(gbpLocations.googleLocationName, googleLocationName)
+        where: and(
+          eq(gbpLocations.userId, userId),
+          eq(gbpLocations.googleLocationName, googleLocationName)
+        )
       });
 
       if (!existingLocation) {
