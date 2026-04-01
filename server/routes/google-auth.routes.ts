@@ -1,168 +1,30 @@
-import { Router } from "express";
-import { randomBytes } from "node:crypto";
-import {
-  getGoogleLoginUrl,
-  getGoogleBusinessConnectUrl,
-  exchangeCodeForToken,
-  getGoogleUserInfo,
-  parseScopes,
-  hasBusinessManageScope
-} from "../google/oauth.service";
-import { createSessionToken, verifySessionToken } from "../auth/session";
-import {
-  upsertUserFromGoogle,
-  upsertGoogleConnection
-} from "../services/google-connection.service";
+import { SignJWT, jwtVerify } from "jose";
 
-const router = Router();
+const secret = process.env.JWT_SECRET;
 
-router.get("/api/auth/google-login", async (_req, res) => {
-  try {
-    const state = randomBytes(16).toString("hex");
+if (!secret) {
+  throw new Error("JWT_SECRET não configurado");
+}
 
-    res.cookie("google_oauth_state", state, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: true,
-      maxAge: 10 * 60 * 1000
-    });
+const key = new TextEncoder().encode(secret);
 
-    return res.redirect(getGoogleLoginUrl(state));
-  } catch (error: any) {
-    console.error("Erro ao iniciar login Google:", error);
-    return res.status(500).send(error?.message || "Erro ao iniciar login Google");
-  }
-});
+export type SessionPayload = {
+  id: string;
+  email: string;
+  name?: string | null;
+  picture?: string | null;
+  googleBusinessConnected?: boolean;
+};
 
-router.get("/api/auth/google-business-connect", async (_req, res) => {
-  try {
-    const state = randomBytes(16).toString("hex");
+export async function createSessionToken(payload: SessionPayload) {
+  return await new SignJWT(payload)
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("30d")
+    .sign(key);
+}
 
-    res.cookie("google_oauth_state", state, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: true,
-      maxAge: 10 * 60 * 1000
-    });
-
-    return res.redirect(getGoogleBusinessConnectUrl(state));
-  } catch (error: any) {
-    console.error("Erro ao iniciar conexão com Google Business:", error);
-    return res.status(500).send(error?.message || "Erro ao iniciar conexão com Google Business");
-  }
-});
-
-router.get("/api/oauth/google/callback", async (req, res) => {
-  try {
-    const { code, state } = req.query as { code?: string; state?: string };
-
-    if (!code || !state) {
-      return res.status(400).send("code/state ausente");
-    }
-
-    const cookieState = req.cookies?.google_oauth_state;
-
-    if (!cookieState || cookieState !== state) {
-      return res.status(400).send("state inválido");
-    }
-
-    const token = await exchangeCodeForToken(code);
-    const userInfo = await getGoogleUserInfo(token.access_token);
-    const scopes = parseScopes(token.scope);
-    const googleBusinessConnected = hasBusinessManageScope(scopes);
-
-    const user = await upsertUserFromGoogle({
-      openId: userInfo.id,
-      email: userInfo.email,
-      name: userInfo.name,
-      picture: userInfo.picture
-    });
-
-    await upsertGoogleConnection({
-      userId: user.id,
-      googleUserId: userInfo.id,
-      googleEmail: userInfo.email,
-      googleName: userInfo.name,
-      accessToken: token.access_token,
-      refreshToken: token.refresh_token,
-      scope: token.scope,
-      expiresIn: token.expires_in,
-      googleBusinessConnected
-    });
-
-    console.log("OAuth Google concluído:", {
-      dbUserId: user.id,
-      googleOpenId: userInfo.id,
-      email: userInfo.email,
-      name: userInfo.name,
-      scope: token.scope,
-      googleBusinessConnected
-    });
-
-    const sessionToken = await createSessionToken({
-      id: String(user.id),
-      googleOpenId: userInfo.id,
-      email: user.email,
-      name: user.name ?? undefined,
-      picture: user.picture ?? undefined,
-      scopes,
-      googleBusinessConnected
-    });
-
-    res.clearCookie("google_oauth_state");
-
-    res.cookie("gbp_session", sessionToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    const appUrl = process.env.APP_URL || "/";
-    const redirectSuffix = googleBusinessConnected
-      ? "?googleBusiness=connected"
-      : "?googleLogin=success";
-
-    return res.redirect(`${appUrl}${redirectSuffix}`);
-  } catch (error: any) {
-    console.error("Erro no callback Google:", error);
-    return res.status(500).send(error?.message || "Erro no callback Google");
-  }
-});
-
-router.get("/api/auth/me", async (req, res) => {
-  try {
-    const token = req.cookies?.gbp_session;
-
-    if (!token) {
-      return res.status(401).json({
-        authenticated: false
-      });
-    }
-
-    const user = await verifySessionToken(token);
-
-    return res.status(200).json({
-      authenticated: true,
-      user
-    });
-  } catch (_error) {
-    return res.status(401).json({
-      authenticated: false
-    });
-  }
-});
-
-router.post("/api/auth/logout", async (_req, res) => {
-  res.clearCookie("gbp_session", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: true
-  });
-
-  return res.status(200).json({
-    ok: true
-  });
-});
-
-export default router;
+export async function verifySessionToken(token: string) {
+  const { payload } = await jwtVerify(token, key);
+  return payload as unknown as SessionPayload;
+}
