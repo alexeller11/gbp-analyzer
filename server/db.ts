@@ -1,24 +1,15 @@
-import "dotenv/config";
-import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import * as schema from "../drizzle/schema";
 
-const databaseUrl = process.env.DATABASE_URL;
+const { Pool } = pg;
 
-if (!databaseUrl) {
+if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL não configurado");
 }
 
-export const pool = new Pool({
-  connectionString: databaseUrl,
-  ssl:
-    process.env.NODE_ENV === "production"
-      ? { rejectUnauthorized: false }
-      : false,
-});
-
-pool.on("error", (err) => {
-  console.error("Erro inesperado no pool PostgreSQL:", err);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
 });
 
 export const db = drizzle(pool, { schema });
@@ -26,9 +17,8 @@ export const db = drizzle(pool, { schema });
 export async function testDatabaseConnection() {
   const client = await pool.connect();
   try {
-    const result = await client.query("select now() as now");
-    console.log("Banco conectado com sucesso:", result.rows[0]?.now);
-    return true;
+    await client.query("select 1");
+    console.log("Banco conectado com sucesso:", new Date().toISOString());
   } finally {
     client.release();
   }
