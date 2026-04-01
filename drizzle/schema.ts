@@ -5,6 +5,7 @@ import {
   timestamp,
   integer,
   boolean,
+  jsonb,
   uniqueIndex,
   index
 } from "drizzle-orm/pg-core";
@@ -45,5 +46,25 @@ export const googleConnections = pgTable(
   (t) => ({
     googleUserIdIdx: uniqueIndex("google_connections_google_user_id_idx").on(t.googleUserId),
     userIdIdx: index("google_connections_user_id_idx").on(t.userId)
+  })
+);
+
+export const gbpAccounts = pgTable(
+  "gbp_accounts",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    googleConnectionId: integer("google_connection_id").notNull(),
+    googleAccountName: text("google_account_name").notNull(),
+    accountId: text("account_id").notNull(),
+    accountDisplayName: text("account_display_name"),
+    accountType: text("account_type"),
+    rawJson: jsonb("raw_json"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull()
+  },
+  (t) => ({
+    googleAccountNameIdx: uniqueIndex("gbp_accounts_google_account_name_idx").on(t.googleAccountName),
+    userIdIdx: index("gbp_accounts_user_id_idx").on(t.userId)
   })
 );
