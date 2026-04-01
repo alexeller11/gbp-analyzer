@@ -22,6 +22,20 @@ function getGoogleRedirectUri(req: any) {
   return `${getBaseUrl(req)}/api/auth/google/callback`;
 }
 
+function parseSessionUserId(rawId: unknown): number | null {
+  if (typeof rawId !== "string" && typeof rawId !== "number") {
+    return null;
+  }
+
+  const numericUserId = Number(rawId);
+
+  if (!Number.isFinite(numericUserId) || numericUserId <= 0) {
+    return null;
+  }
+
+  return numericUserId;
+}
+
 router.get("/api/auth/google-login", async (req, res) => {
   try {
     const clientId = getRequiredEnv("GOOGLE_OAUTH_CLIENT_ID");
@@ -233,7 +247,20 @@ router.get("/api/auth/me", async (req, res) => {
     }
 
     const session = await verifySessionToken(token);
-    const userId = Number(session.id);
+    const userId = parseSessionUserId(session.id);
+
+    if (!userId) {
+      res.clearCookie("gbp_session", {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        path: "/"
+      });
+
+      return res.status(200).json({
+        authenticated: false
+      });
+    }
 
     const user = await db.query.users.findFirst({
       where: eq(users.id, userId)
