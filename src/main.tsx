@@ -53,10 +53,11 @@ function App() {
   const [locations, setLocations] = React.useState<GbpLocation[]>([]);
   const [importingAccounts, setImportingAccounts] = React.useState(false);
   const [importingLocations, setImportingLocations] = React.useState(false);
+  const [syncingDetails, setSyncingDetails] = React.useState(false);
   const [accountsLoading, setAccountsLoading] = React.useState(false);
   const [locationsLoading, setLocationsLoading] = React.useState(false);
   const [message, setMessage] = React.useState("");
-  const [lastImportResult, setLastImportResult] = React.useState<any>(null);
+  const [lastResult, setLastResult] = React.useState<any>(null);
 
   async function loadMe() {
     const res = await fetch("/api/auth/me", {
@@ -121,7 +122,7 @@ function App() {
   async function handleImportAccounts() {
     setImportingAccounts(true);
     setMessage("");
-    setLastImportResult(null);
+    setLastResult(null);
 
     try {
       const res = await fetch("/api/gbp/import", {
@@ -136,7 +137,7 @@ function App() {
         return;
       }
 
-      setLastImportResult(data.result);
+      setLastResult(data.result);
       setMessage(
         `Importação de contas concluída. ${data.result?.imported ?? 0} novas contas importadas.`
       );
@@ -150,7 +151,7 @@ function App() {
   async function handleImportLocations() {
     setImportingLocations(true);
     setMessage("");
-    setLastImportResult(null);
+    setLastResult(null);
 
     try {
       const res = await fetch("/api/gbp/import-locations", {
@@ -165,7 +166,7 @@ function App() {
         return;
       }
 
-      setLastImportResult(data.result);
+      setLastResult(data.result);
       setMessage(
         `Importação de perfis concluída. ${data.result?.locationsImported ?? 0} novos perfis importados.`
       );
@@ -173,6 +174,35 @@ function App() {
       await loadLocations();
     } finally {
       setImportingLocations(false);
+    }
+  }
+
+  async function handleSyncDetails() {
+    setSyncingDetails(true);
+    setMessage("");
+    setLastResult(null);
+
+    try {
+      const res = await fetch("/api/gbp/sync-location-details", {
+        method: "POST",
+        credentials: "include"
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessage(data?.error || "Erro ao sincronizar detalhes");
+        return;
+      }
+
+      setLastResult(data.result);
+      setMessage(
+        `Sincronização concluída. ${data.result?.enriched ?? 0} perfis enriquecidos.`
+      );
+
+      await loadLocations();
+    } finally {
+      setSyncingDetails(false);
     }
   }
 
@@ -266,6 +296,13 @@ function App() {
             {importingLocations ? "Importando perfis..." : "Importar todos os perfis"}
           </button>
 
+          <button
+            onClick={handleSyncDetails}
+            disabled={syncingDetails || !me.user?.googleBusinessConnected}
+          >
+            {syncingDetails ? "Sincronizando..." : "Sincronizar detalhes"}
+          </button>
+
           <button onClick={loadLocations} disabled={locationsLoading}>
             {locationsLoading ? "Carregando..." : "Atualizar perfis"}
           </button>
@@ -273,7 +310,7 @@ function App() {
 
         {message ? <p>{message}</p> : null}
 
-        {lastImportResult ? (
+        {lastResult ? (
           <pre
             style={{
               background: "#eef6ff",
@@ -283,7 +320,7 @@ function App() {
               maxHeight: 400
             }}
           >
-            {JSON.stringify(lastImportResult, null, 2)}
+            {JSON.stringify(lastResult, null, 2)}
           </pre>
         ) : null}
 
