@@ -8,6 +8,10 @@ import {
   importGoogleBusinessLocations,
   syncGoogleBusinessLocationDetails
 } from "../services/google-import.service.ts";
+import {
+  refreshBusinessScores,
+  getAgencyDashboard
+} from "../services/dashboard.service.ts";
 
 const router = Router();
 
@@ -47,10 +51,7 @@ router.post("/api/gbp/import", async (req, res) => {
     const userId = await getAuthenticatedUserId(req);
     const result = await importGoogleBusinessAccounts(userId);
 
-    return res.status(200).json({
-      ok: true,
-      result
-    });
+    return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao importar contas GBP:", error);
     return res.status(500).json({
@@ -65,10 +66,7 @@ router.post("/api/gbp/import-locations", async (req, res) => {
     const userId = await getAuthenticatedUserId(req);
     const result = await importGoogleBusinessLocations(userId);
 
-    return res.status(200).json({
-      ok: true,
-      result
-    });
+    return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao importar locations GBP:", error);
     return res.status(500).json({
@@ -83,15 +81,45 @@ router.post("/api/gbp/sync-location-details", async (req, res) => {
     const userId = await getAuthenticatedUserId(req);
     const result = await syncGoogleBusinessLocationDetails(userId);
 
-    return res.status(200).json({
-      ok: true,
-      result
-    });
+    return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao sincronizar detalhes das locations:", error);
     return res.status(500).json({
       ok: false,
       error: error?.message || "Erro ao sincronizar detalhes das locations"
+    });
+  }
+});
+
+router.post("/api/gbp/refresh-scores", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const result = await refreshBusinessScores(userId);
+
+    return res.status(200).json({ ok: true, result });
+  } catch (error: any) {
+    console.error("Erro ao atualizar scores:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao atualizar scores"
+    });
+  }
+});
+
+router.get("/api/gbp/dashboard", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const result = await getAgencyDashboard(userId);
+
+    return res.status(200).json({
+      ok: true,
+      ...result
+    });
+  } catch (error: any) {
+    console.error("Erro ao carregar dashboard GBP:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao carregar dashboard GBP"
     });
   }
 });
@@ -171,7 +199,9 @@ router.get("/api/gbp/locations", async (req, res) => {
               city: businessMap.get(location.businessId)!.city,
               state: businessMap.get(location.businessId)!.state,
               phone: businessMap.get(location.businessId)!.phone,
-              website: businessMap.get(location.businessId)!.website
+              website: businessMap.get(location.businessId)!.website,
+              score: businessMap.get(location.businessId)!.score,
+              leadType: businessMap.get(location.businessId)!.leadType
             }
           : null
       }))
