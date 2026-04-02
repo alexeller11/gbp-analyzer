@@ -108,25 +108,15 @@ async function fetchAllLocationsForAccount(
   };
 }
 
-async function fetchLocationDetails(
+async function fetchLocationDetailsWithMask(
   accessToken: string,
-  googleLocationName: string
+  googleLocationName: string,
+  readMask: string
 ) {
-  const detailMask = [
-    "name",
-    "title",
-    "storeCode",
-    "languageCode",
-    "websiteUri",
-    "phoneNumbers",
-    "storefrontAddress",
-    "primaryCategory"
-  ].join(",");
-
   const url = new URL(
     `https://mybusinessbusinessinformation.googleapis.com/v1/${googleLocationName}`
   );
-  url.searchParams.set("readMask", detailMask);
+  url.searchParams.set("readMask", readMask);
 
   const response = await fetch(url.toString(), {
     headers: {
@@ -147,6 +137,68 @@ async function fetchLocationDetails(
   return {
     ok: true as const,
     location: data
+  };
+}
+
+async function fetchLocationDetails(
+  accessToken: string,
+  googleLocationName: string
+) {
+  const masks = [
+    [
+      "name",
+      "title",
+      "storeCode",
+      "languageCode",
+      "websiteUri",
+      "phoneNumbers",
+      "storefrontAddress",
+      "primaryCategory"
+    ].join(","),
+    [
+      "name",
+      "title",
+      "storeCode",
+      "languageCode",
+      "websiteUri"
+    ].join(",")
+  ];
+
+  for (const mask of masks) {
+    const result = await fetchLocationDetailsWithMask(
+      accessToken,
+      googleLocationName,
+      mask
+    );
+
+    if (result.ok) {
+      return {
+        ok: true as const,
+        location: result.location,
+        usedMask: mask
+      };
+    }
+  }
+
+  const lastAttempt = await fetchLocationDetailsWithMask(
+    accessToken,
+    googleLocationName,
+    "name,title"
+  );
+
+  if (lastAttempt.ok) {
+    return {
+      ok: true as const,
+      location: lastAttempt.location,
+      usedMask: "name,title"
+    };
+  }
+
+  return {
+    ok: false as const,
+    error: lastAttempt.error,
+    location: null,
+    usedMask: null
   };
 }
 
@@ -409,7 +461,8 @@ export async function importGoogleBusinessLocations(userId: number) {
         state,
         phone,
         website,
-        verificationState
+        verificationState,
+        usedMask: detailResult.ok ? detailResult.usedMask : null
       });
     }
   }
@@ -510,7 +563,8 @@ export async function syncGoogleBusinessLocationDetails(userId: number) {
         state,
         phone,
         website,
-        verificationState
+        verificationState,
+        usedMask: detailResult.usedMask
       });
     }
   }
