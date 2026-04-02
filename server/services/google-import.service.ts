@@ -49,6 +49,18 @@ function parseWebsite(profile: any) {
   return profile?.websiteUri ? String(profile.websiteUri) : null;
 }
 
+function parseVerificationState(profile: any) {
+  const metadata = profile?.metadata;
+
+  if (!metadata) return null;
+
+  if (metadata.verification?.verificationState) {
+    return String(metadata.verification.verificationState);
+  }
+
+  return null;
+}
+
 async function fetchAllLocationsForAccount(
   accessToken: string,
   googleAccountName: string
@@ -108,7 +120,8 @@ async function fetchLocationDetails(
     "websiteUri",
     "phoneNumbers",
     "storefrontAddress",
-    "primaryCategory"
+    "primaryCategory",
+    "metadata"
   ].join(",");
 
   const url = new URL(
@@ -292,9 +305,8 @@ export async function importGoogleBusinessLocations(userId: number) {
       const primaryCategory = parsePrimaryCategory(profile);
       const phone = parsePhone(profile);
       const website = parseWebsite(profile);
-
-      const verificationState = null;
-      const isVerified = false;
+      const verificationState = parseVerificationState(profile);
+      const isVerified = verificationState === "VERIFIED";
 
       let business = await db.query.businesses.findFirst({
         where: and(
@@ -360,7 +372,7 @@ export async function importGoogleBusinessLocations(userId: number) {
           languageCode: profile.languageCode ? String(profile.languageCode) : null,
           verificationState,
           isVerified,
-          metadataJson: null,
+          metadataJson: profile.metadata || null,
           profileJson: profile,
           lastImportedAt: new Date(),
           lastSyncedAt: new Date(),
@@ -379,7 +391,7 @@ export async function importGoogleBusinessLocations(userId: number) {
             languageCode: profile.languageCode ? String(profile.languageCode) : null,
             verificationState,
             isVerified,
-            metadataJson: null,
+            metadataJson: profile.metadata || null,
             profileJson: profile,
             lastImportedAt: new Date(),
             lastSyncedAt: new Date(),
@@ -392,7 +404,13 @@ export async function importGoogleBusinessLocations(userId: number) {
         accountId: account.accountId,
         accountDisplayName: account.accountDisplayName,
         locationId,
-        title
+        title,
+        primaryCategory,
+        city,
+        state,
+        phone,
+        website,
+        verificationState
       });
     }
   }
@@ -404,5 +422,90 @@ export async function importGoogleBusinessLocations(userId: number) {
     totalCollected: collected.length,
     sample: collected.slice(0, 20),
     diagnostics: accountDiagnostics
+  };
+}
+
+export async function syncGoogleBusinessLocationDetails(userId: number) {
+  const { accessToken } = await getValidGoogleAccessToken(userId);
+
+  const locations = await db.query.gbpLocations.findMany({
+    where: eq(gbpLocations.userId, userId)
+  });
+
+  let synced = 0;
+  let enriched = 0;
+  const errors: any[] = [];
+
+  for (const location of locations) {
+    const detailResult = await fetchLocationDetails(
+      accessToken,
+      location.googleLocationName
+    );
+
+    if (!detailResult.ok || !detailResult.location) {
+      errors.push({
+        locationId: location.locationId,
+        googleLocationName: location.googleLocationName,
+        error: detailResult.error || "unknown_error"
+      });
+      continue;
+    }
+
+    const profile = detailResult.location;
+    const title = profile.title ? String(profile.title) : location.title;
+    const { city, state } = parseAddress(profile);
+    const primaryCategory = parsePrimaryCategory(profile);
+    const phone = parsePhone(profile);
+    const website = parseWebsite(profile);
+    const verificationState = parseVerificationState(profile);
+    const isVerified = verificationState === "VERIFIED";
+
+    await db
+      .update(gbpLocations)
+      .set({
+        title,
+        storeCode: profile.storeCode ? String(profile.storeCode) : null,
+        languageCode: profile.languageCode ? String(profile.languageCode) : null,
+        verificationState,
+        isVerified,
+        metadataJson: profile.metadata || null,
+        profileJson: profile,
+        lastSyncedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(gbpLocations.id, location.id));
+
+    await db
+      .update(businesses)
+      .set({
+        name: title,
+        primaryCategory,
+        city,
+        state,
+        phone,
+        website,
+        updatedAt: new Date()
+      })
+      .where(eq(businesses.id, location.businessId));
+
+    synced += 1;
+
+    if (
+      primaryCategory ||
+      city ||
+      state ||
+      phone ||
+      website ||
+      verificationState
+    ) {
+      enriched += 1;
+    }
+  }
+
+  return {
+    totalLocations: locations.length,
+    synced,
+    enriched,
+    errors: errors.slice(0, 20)
   };
 }
