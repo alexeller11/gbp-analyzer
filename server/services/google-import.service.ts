@@ -120,8 +120,7 @@ async function fetchLocationDetails(
     "websiteUri",
     "phoneNumbers",
     "storefrontAddress",
-    "primaryCategory",
-    "metadata"
+    "primaryCategory"
   ].join(",");
 
   const url = new URL(
@@ -372,7 +371,7 @@ export async function importGoogleBusinessLocations(userId: number) {
           languageCode: profile.languageCode ? String(profile.languageCode) : null,
           verificationState,
           isVerified,
-          metadataJson: profile.metadata || null,
+          metadataJson: null,
           profileJson: profile,
           lastImportedAt: new Date(),
           lastSyncedAt: new Date(),
@@ -391,7 +390,7 @@ export async function importGoogleBusinessLocations(userId: number) {
             languageCode: profile.languageCode ? String(profile.languageCode) : null,
             verificationState,
             isVerified,
-            metadataJson: profile.metadata || null,
+            metadataJson: null,
             profileJson: profile,
             lastImportedAt: new Date(),
             lastSyncedAt: new Date(),
@@ -435,6 +434,7 @@ export async function syncGoogleBusinessLocationDetails(userId: number) {
   let synced = 0;
   let enriched = 0;
   const errors: any[] = [];
+  const sample: any[] = [];
 
   for (const location of locations) {
     const detailResult = await fetchLocationDetails(
@@ -468,7 +468,7 @@ export async function syncGoogleBusinessLocationDetails(userId: number) {
         languageCode: profile.languageCode ? String(profile.languageCode) : null,
         verificationState,
         isVerified,
-        metadataJson: profile.metadata || null,
+        metadataJson: null,
         profileJson: profile,
         lastSyncedAt: new Date(),
         updatedAt: new Date()
@@ -500,12 +500,26 @@ export async function syncGoogleBusinessLocationDetails(userId: number) {
     ) {
       enriched += 1;
     }
+
+    if (sample.length < 20) {
+      sample.push({
+        locationId: location.locationId,
+        title,
+        primaryCategory,
+        city,
+        state,
+        phone,
+        website,
+        verificationState
+      });
+    }
   }
 
   return {
     totalLocations: locations.length,
     synced,
     enriched,
+    sample,
     errors: errors.slice(0, 20)
   };
 }
