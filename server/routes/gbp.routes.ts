@@ -5,7 +5,8 @@ import { gbpAccounts, gbpLocations, businesses } from "../../drizzle/schema.ts";
 import { verifySessionToken } from "../auth/session.ts";
 import {
   importGoogleBusinessAccounts,
-  importGoogleBusinessLocations
+  importGoogleBusinessLocations,
+  syncGoogleBusinessLocationDetails
 } from "../services/google-import.service.ts";
 
 const router = Router();
@@ -73,6 +74,24 @@ router.post("/api/gbp/import-locations", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message || "Erro ao importar locations GBP"
+    });
+  }
+});
+
+router.post("/api/gbp/sync-location-details", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const result = await syncGoogleBusinessLocationDetails(userId);
+
+    return res.status(200).json({
+      ok: true,
+      result
+    });
+  } catch (error: any) {
+    console.error("Erro ao sincronizar detalhes das locations:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao sincronizar detalhes das locations"
     });
   }
 });
