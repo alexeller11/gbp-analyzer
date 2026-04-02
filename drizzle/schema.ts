@@ -76,6 +76,8 @@ export const businesses = pgTable(
     userId: integer("user_id").notNull(),
     source: text("source").default("google_import").notNull(),
     status: text("status").default("active").notNull(),
+    leadType: text("lead_type").default("client").notNull(),
+    score: integer("score").default(0).notNull(),
     name: text("name").notNull(),
     primaryCategory: text("primary_category"),
     city: text("city"),
