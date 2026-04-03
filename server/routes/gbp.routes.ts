@@ -3,11 +3,7 @@ import { eq, asc } from "drizzle-orm";
 import { db } from "../db.ts";
 import { gbpAccounts, gbpLocations, businesses } from "../../drizzle/schema.ts";
 import { verifySessionToken } from "../auth/session.ts";
-import {
-  importGoogleBusinessAccounts,
-  importGoogleBusinessLocations,
-  syncGoogleBusinessLocationDetails
-} from "../services/google-import.service.ts";
+import * as googleImportService from "../services/google-import.service.ts";
 import {
   refreshBusinessScores,
   getAgencyDashboard
@@ -15,6 +11,28 @@ import {
 import { refreshBusinessInsights } from "../services/insights.service.ts";
 
 const router = Router();
+
+function getGoogleImportFunctions() {
+  const importAccounts = googleImportService.importGoogleBusinessAccounts;
+  const importLocations = googleImportService.importGoogleBusinessLocations;
+  const syncLocationDetails = googleImportService.syncGoogleBusinessLocationDetails;
+
+  if (
+    typeof importAccounts !== "function" ||
+    typeof importLocations !== "function" ||
+    typeof syncLocationDetails !== "function"
+  ) {
+    throw new Error(
+      "Serviço de importação GBP inválido: exports esperados não encontrados."
+    );
+  }
+
+  return {
+    importAccounts,
+    importLocations,
+    syncLocationDetails
+  };
+}
 
 function parseSessionUserId(rawId: unknown): number | null {
   if (typeof rawId !== "string" && typeof rawId !== "number") {
@@ -49,8 +67,9 @@ async function getAuthenticatedUserId(req: any) {
 
 router.post("/api/gbp/import", async (req, res) => {
   try {
+    const { importAccounts } = getGoogleImportFunctions();
     const userId = await getAuthenticatedUserId(req);
-    const result = await importGoogleBusinessAccounts(userId);
+    const result = await importAccounts(userId);
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao importar contas GBP:", error);
@@ -60,8 +79,9 @@ router.post("/api/gbp/import", async (req, res) => {
 
 router.post("/api/gbp/import-locations", async (req, res) => {
   try {
+    const { importLocations } = getGoogleImportFunctions();
     const userId = await getAuthenticatedUserId(req);
-    const result = await importGoogleBusinessLocations(userId);
+    const result = await importLocations(userId);
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao importar locations GBP:", error);
@@ -71,8 +91,9 @@ router.post("/api/gbp/import-locations", async (req, res) => {
 
 router.post("/api/gbp/sync-location-details", async (req, res) => {
   try {
+    const { syncLocationDetails } = getGoogleImportFunctions();
     const userId = await getAuthenticatedUserId(req);
-    const result = await syncGoogleBusinessLocationDetails(userId);
+    const result = await syncLocationDetails(userId);
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao sincronizar detalhes das locations:", error);
