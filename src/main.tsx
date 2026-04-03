@@ -32,6 +32,7 @@ type DashboardRow = {
   website: string | null;
   score: number;
   leadType: string;
+  pipelineStage: string;
   priorityLevel: string;
   priorityReason: string | null;
   aiSummary: string | null;
@@ -59,6 +60,14 @@ type DashboardResponse = {
     totalWithWebsite: number;
     totalVerified: number;
     highPriority: number;
+  };
+  pipelineSummary?: {
+    new: number;
+    contacted: number;
+    meeting: number;
+    proposal: number;
+    won: number;
+    lost: number;
   };
   accountsSummary?: AccountSummary[];
   topProfiles?: DashboardRow[];
@@ -104,6 +113,27 @@ function badgeStyle(level: string): React.CSSProperties {
   };
 }
 
+function stageStyle(stage: string): React.CSSProperties {
+  const map: Record<string, string> = {
+    new: "#6b7280",
+    contacted: "#2563eb",
+    meeting: "#7c3aed",
+    proposal: "#d97706",
+    won: "#059669",
+    lost: "#dc2626"
+  };
+
+  return {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#fff",
+    background: map[stage] || "#6b7280"
+  };
+}
+
 function App() {
   const [loading, setLoading] = React.useState(true);
   const [me, setMe] = React.useState<MeResponse | null>(null);
@@ -113,6 +143,7 @@ function App() {
   const [query, setQuery] = React.useState("");
   const [accountFilter, setAccountFilter] = React.useState("all");
   const [leadFilter, setLeadFilter] = React.useState("all");
+  const [stageFilter, setStageFilter] = React.useState("all");
   const [working, setWorking] = React.useState<string | null>(null);
   const [editingBusinessId, setEditingBusinessId] = React.useState<number | null>(null);
   const [editForm, setEditForm] = React.useState({
@@ -122,6 +153,7 @@ function App() {
     phone: "",
     website: "",
     leadType: "prospect",
+    pipelineStage: "new",
     notes: ""
   });
 
@@ -211,6 +243,10 @@ function App() {
     }
   }
 
+  async function handleExportCsv() {
+    window.open("/api/gbp/export.csv", "_blank");
+  }
+
   async function handleLogout() {
     await fetch("/api/auth/logout", {
       method: "POST",
@@ -237,15 +273,8 @@ function App() {
   }
 
   const rows = Array.isArray(dashboard?.rows) ? dashboard!.rows! : [];
-  const accountsSummary = Array.isArray(dashboard?.accountsSummary)
-    ? dashboard!.accountsSummary!
-    : [];
-  const topProfiles = Array.isArray(dashboard?.topProfiles)
-    ? dashboard!.topProfiles!
-    : [];
-  const topOpportunities = Array.isArray(dashboard?.topOpportunities)
-    ? dashboard!.topOpportunities!
-    : [];
+  const accountsSummary = Array.isArray(dashboard?.accountsSummary) ? dashboard!.accountsSummary! : [];
+  const topOpportunities = Array.isArray(dashboard?.topOpportunities) ? dashboard!.topOpportunities! : [];
 
   const accounts = Array.from(
     new Map(
@@ -262,49 +291,29 @@ function App() {
       (row.city || "").toLowerCase().includes(query.toLowerCase()) ||
       (row.website || "").toLowerCase().includes(query.toLowerCase());
 
-    const matchesAccount =
-      accountFilter === "all" || row.accountId === accountFilter;
+    const matchesAccount = accountFilter === "all" || row.accountId === accountFilter;
+    const matchesLead = leadFilter === "all" || row.leadType === leadFilter;
+    const matchesStage = stageFilter === "all" || row.pipelineStage === stageFilter;
 
-    const matchesLead =
-      leadFilter === "all" || row.leadType === leadFilter;
-
-    return matchesQuery && matchesAccount && matchesLead;
+    return matchesQuery && matchesAccount && matchesLead && matchesStage;
   });
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#f6f8fb",
-        fontFamily: "Arial, sans-serif",
-        color: "#111827"
-      }}
-    >
-      <div style={{ maxWidth: 1450, margin: "0 auto", padding: 24 }}>
-        <div
-          style={{
-            ...cardStyle(),
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 16,
-            marginBottom: 20
-          }}
-        >
+    <div style={{ minHeight: "100vh", background: "#f6f8fb", fontFamily: "Arial, sans-serif", color: "#111827" }}>
+      <div style={{ maxWidth: 1500, margin: "0 auto", padding: 24 }}>
+        <div style={{ ...cardStyle(), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 20 }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 28 }}>GBP Analyzer • Inteligência Comercial</h1>
+            <h1 style={{ margin: 0, fontSize: 28 }}>GBP Analyzer • Funil Comercial</h1>
             <p style={{ margin: "8px 0 0", color: "#6b7280" }}>
               {me.user?.name} • {me.user?.email}
             </p>
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button style={buttonStyle()} onClick={() => handleAction("Importação de contas", "/api/gbp/import")}>Importar contas</button>
-            <button style={buttonStyle()} onClick={() => handleAction("Importação de perfis", "/api/gbp/import-locations")}>Importar perfis</button>
-            <button style={buttonStyle()} onClick={() => handleAction("Sincronização de detalhes", "/api/gbp/sync-location-details")}>Sincronizar detalhes</button>
             <button style={buttonStyle()} onClick={() => handleAction("Atualização de scores", "/api/gbp/refresh-scores")}>Atualizar scores</button>
             <button style={buttonStyle()} onClick={() => handleAction("Atualização de insights", "/api/gbp/refresh-insights")}>Gerar insights</button>
             <button style={buttonStyle()} onClick={loadDashboard}>Atualizar dashboard</button>
+            <button style={buttonStyle()} onClick={handleExportCsv}>Exportar CSV</button>
             <button style={buttonStyle()} onClick={handleLogout}>Sair</button>
           </div>
         </div>
@@ -320,14 +329,7 @@ function App() {
           </div>
         ) : null}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-            gap: 16,
-            marginBottom: 20
-          }}
-        >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 16, marginBottom: 20 }}>
           <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Perfis</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalProfiles ?? 0}</div></div>
           <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Contas</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalAccounts ?? 0}</div></div>
           <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Clientes</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalClients ?? 0}</div></div>
@@ -337,25 +339,21 @@ function App() {
           <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Alta prioridade</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.highPriority ?? 0}</div></div>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 20,
-            marginBottom: 20
-          }}
-        >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 16, marginBottom: 20 }}>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Novo</div><div style={{ fontSize: 24, fontWeight: 700 }}>{dashboard?.pipelineSummary?.new ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Contato feito</div><div style={{ fontSize: 24, fontWeight: 700 }}>{dashboard?.pipelineSummary?.contacted ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Reunião</div><div style={{ fontSize: 24, fontWeight: 700 }}>{dashboard?.pipelineSummary?.meeting ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Proposta</div><div style={{ fontSize: 24, fontWeight: 700 }}>{dashboard?.pipelineSummary?.proposal ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Ganhos</div><div style={{ fontSize: 24, fontWeight: 700 }}>{dashboard?.pipelineSummary?.won ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Perdidos</div><div style={{ fontSize: 24, fontWeight: 700 }}>{dashboard?.pipelineSummary?.lost ?? 0}</div></div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
           <div style={cardStyle()}>
             <div style={{ marginBottom: 14, fontWeight: 700 }}>Top oportunidades</div>
             <div style={{ overflow: "auto", maxHeight: 320 }}>
               {topOpportunities.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    borderBottom: "1px solid #f0f2f5",
-                    padding: "12px 0"
-                  }}
-                >
+                <div key={item.id} style={{ borderBottom: "1px solid #f0f2f5", padding: "12px 0" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <strong>{item.businessName}</strong>
                     <span style={badgeStyle(item.priorityLevel)}>{item.priorityLevel}</span>
@@ -401,13 +399,7 @@ function App() {
         </div>
 
         <div style={{ ...cardStyle(), marginBottom: 20 }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "2fr 1fr 1fr",
-              gap: 12
-            }}
-          >
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 12 }}>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -415,32 +407,34 @@ function App() {
               style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
             />
 
-            <select
-              value={accountFilter}
-              onChange={(e) => setAccountFilter(e.target.value)}
-              style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
-            >
+            <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}>
               <option value="all">Todas as contas</option>
               {accounts.map(([id, name]) => (
                 <option key={id} value={id}>{name}</option>
               ))}
             </select>
 
-            <select
-              value={leadFilter}
-              onChange={(e) => setLeadFilter(e.target.value)}
-              style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
-            >
+            <select value={leadFilter} onChange={(e) => setLeadFilter(e.target.value)} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}>
               <option value="all">Todos os tipos</option>
               <option value="client">Clientes</option>
               <option value="prospect">Prospects</option>
+            </select>
+
+            <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}>
+              <option value="all">Todos os estágios</option>
+              <option value="new">Novo</option>
+              <option value="contacted">Contato feito</option>
+              <option value="meeting">Reunião</option>
+              <option value="proposal">Proposta</option>
+              <option value="won">Ganho</option>
+              <option value="lost">Perdido</option>
             </select>
           </div>
         </div>
 
         <div style={cardStyle()}>
           <div style={{ marginBottom: 12, fontWeight: 700 }}>
-            Perfis importados ({filteredRows.length})
+            Carteira de perfis ({filteredRows.length})
           </div>
 
           <div style={{ overflow: "auto" }}>
@@ -450,10 +444,10 @@ function App() {
                   <th style={{ padding: "10px 8px" }}>Empresa</th>
                   <th style={{ padding: "10px 8px" }}>Conta</th>
                   <th style={{ padding: "10px 8px" }}>Tipo</th>
+                  <th style={{ padding: "10px 8px" }}>Pipeline</th>
                   <th style={{ padding: "10px 8px" }}>Prioridade</th>
                   <th style={{ padding: "10px 8px" }}>Score</th>
                   <th style={{ padding: "10px 8px" }}>Cidade</th>
-                  <th style={{ padding: "10px 8px" }}>Site</th>
                   <th style={{ padding: "10px 8px" }}>Resumo IA</th>
                   <th style={{ padding: "10px 8px" }}>Ações</th>
                 </tr>
@@ -465,17 +459,15 @@ function App() {
                     <td style={{ padding: "10px 8px" }}>{row.accountDisplayName || "-"}</td>
                     <td style={{ padding: "10px 8px" }}>{row.leadType}</td>
                     <td style={{ padding: "10px 8px" }}>
+                      <span style={stageStyle(row.pipelineStage)}>{row.pipelineStage}</span>
+                    </td>
+                    <td style={{ padding: "10px 8px" }}>
                       <span style={badgeStyle(row.priorityLevel)}>{row.priorityLevel}</span>
                     </td>
                     <td style={{ padding: "10px 8px", fontWeight: 700 }}>{row.score}</td>
                     <td style={{ padding: "10px 8px" }}>{[row.city, row.state].filter(Boolean).join(" / ") || "-"}</td>
-                    <td style={{ padding: "10px 8px" }}>
-                      {row.website ? <a href={row.website} target="_blank" rel="noreferrer">abrir</a> : "-"}
-                    </td>
                     <td style={{ padding: "10px 8px", maxWidth: 320 }}>
-                      <span style={{ fontSize: 13, color: "#4b5563" }}>
-                        {row.aiSummary || "-"}
-                      </span>
+                      <span style={{ fontSize: 13, color: "#4b5563" }}>{row.aiSummary || "-"}</span>
                     </td>
                     <td style={{ padding: "10px 8px" }}>
                       <button
@@ -489,6 +481,7 @@ function App() {
                             phone: row.phone || "",
                             website: row.website || "",
                             leadType: row.leadType || "prospect",
+                            pipelineStage: row.pipelineStage || "new",
                             notes: row.notes || ""
                           });
                         }}
@@ -507,50 +500,23 @@ function App() {
           <div style={{ ...cardStyle(), marginTop: 20 }}>
             <div style={{ marginBottom: 12, fontWeight: 700 }}>Editar empresa</div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                gap: 12
-              }}
-            >
-              <input
-                placeholder="Categoria"
-                value={editForm.primaryCategory}
-                onChange={(e) => setEditForm({ ...editForm, primaryCategory: e.target.value })}
-                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
-              />
-              <input
-                placeholder="Cidade"
-                value={editForm.city}
-                onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
-                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
-              />
-              <input
-                placeholder="Estado"
-                value={editForm.state}
-                onChange={(e) => setEditForm({ ...editForm, state: e.target.value })}
-                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
-              />
-              <input
-                placeholder="Telefone"
-                value={editForm.phone}
-                onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
-              />
-              <input
-                placeholder="Website"
-                value={editForm.website}
-                onChange={(e) => setEditForm({ ...editForm, website: e.target.value })}
-                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
-              />
-              <select
-                value={editForm.leadType}
-                onChange={(e) => setEditForm({ ...editForm, leadType: e.target.value })}
-                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
-              >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+              <input placeholder="Categoria" value={editForm.primaryCategory} onChange={(e) => setEditForm({ ...editForm, primaryCategory: e.target.value })} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }} />
+              <input placeholder="Cidade" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }} />
+              <input placeholder="Estado" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }} />
+              <input placeholder="Telefone" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }} />
+              <input placeholder="Website" value={editForm.website} onChange={(e) => setEditForm({ ...editForm, website: e.target.value })} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }} />
+              <select value={editForm.leadType} onChange={(e) => setEditForm({ ...editForm, leadType: e.target.value })} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}>
                 <option value="client">Cliente</option>
                 <option value="prospect">Prospect</option>
+              </select>
+              <select value={editForm.pipelineStage} onChange={(e) => setEditForm({ ...editForm, pipelineStage: e.target.value })} style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}>
+                <option value="new">Novo</option>
+                <option value="contacted">Contato feito</option>
+                <option value="meeting">Reunião</option>
+                <option value="proposal">Proposta</option>
+                <option value="won">Ganho</option>
+                <option value="lost">Perdido</option>
               </select>
             </div>
 
