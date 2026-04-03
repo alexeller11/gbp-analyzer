@@ -32,6 +32,10 @@ type DashboardRow = {
   website: string | null;
   score: number;
   leadType: string;
+  priorityLevel: string;
+  priorityReason: string | null;
+  aiSummary: string | null;
+  notes: string | null;
 };
 
 type AccountSummary = {
@@ -54,9 +58,11 @@ type DashboardResponse = {
     totalProspects: number;
     totalWithWebsite: number;
     totalVerified: number;
+    highPriority: number;
   };
   accountsSummary?: AccountSummary[];
   topProfiles?: DashboardRow[];
+  topOpportunities?: DashboardRow[];
   rows?: DashboardRow[];
 };
 
@@ -80,6 +86,24 @@ function buttonStyle(): React.CSSProperties {
   };
 }
 
+function badgeStyle(level: string): React.CSSProperties {
+  const map: Record<string, string> = {
+    high: "#dc2626",
+    medium: "#d97706",
+    low: "#2563eb"
+  };
+
+  return {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#fff",
+    background: map[level] || "#6b7280"
+  };
+}
+
 function App() {
   const [loading, setLoading] = React.useState(true);
   const [me, setMe] = React.useState<MeResponse | null>(null);
@@ -97,7 +121,8 @@ function App() {
     state: "",
     phone: "",
     website: "",
-    leadType: "prospect"
+    leadType: "prospect",
+    notes: ""
   });
 
   async function loadMe() {
@@ -179,6 +204,7 @@ function App() {
       setMessage("Empresa atualizada com sucesso.");
       setEditingBusinessId(null);
       await handleAction("Atualização de scores", "/api/gbp/refresh-scores");
+      await handleAction("Atualização de insights", "/api/gbp/refresh-insights");
       await loadDashboard();
     } finally {
       setWorking(null);
@@ -216,6 +242,9 @@ function App() {
     : [];
   const topProfiles = Array.isArray(dashboard?.topProfiles)
     ? dashboard!.topProfiles!
+    : [];
+  const topOpportunities = Array.isArray(dashboard?.topOpportunities)
+    ? dashboard!.topOpportunities!
     : [];
 
   const accounts = Array.from(
@@ -263,25 +292,18 @@ function App() {
           }}
         >
           <div>
-            <h1 style={{ margin: 0, fontSize: 28 }}>GBP Analyzer • Modo Agência</h1>
+            <h1 style={{ margin: 0, fontSize: 28 }}>GBP Analyzer • Inteligência Comercial</h1>
             <p style={{ margin: "8px 0 0", color: "#6b7280" }}>
               {me.user?.name} • {me.user?.email}
             </p>
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button style={buttonStyle()} onClick={() => handleAction("Importação de contas", "/api/gbp/import")}>
-              {working === "Importação de contas" ? "Processando..." : "Importar contas"}
-            </button>
-            <button style={buttonStyle()} onClick={() => handleAction("Importação de perfis", "/api/gbp/import-locations")}>
-              {working === "Importação de perfis" ? "Processando..." : "Importar perfis"}
-            </button>
-            <button style={buttonStyle()} onClick={() => handleAction("Sincronização de detalhes", "/api/gbp/sync-location-details")}>
-              {working === "Sincronização de detalhes" ? "Processando..." : "Sincronizar detalhes"}
-            </button>
-            <button style={buttonStyle()} onClick={() => handleAction("Atualização de scores", "/api/gbp/refresh-scores")}>
-              {working === "Atualização de scores" ? "Processando..." : "Atualizar scores"}
-            </button>
+            <button style={buttonStyle()} onClick={() => handleAction("Importação de contas", "/api/gbp/import")}>Importar contas</button>
+            <button style={buttonStyle()} onClick={() => handleAction("Importação de perfis", "/api/gbp/import-locations")}>Importar perfis</button>
+            <button style={buttonStyle()} onClick={() => handleAction("Sincronização de detalhes", "/api/gbp/sync-location-details")}>Sincronizar detalhes</button>
+            <button style={buttonStyle()} onClick={() => handleAction("Atualização de scores", "/api/gbp/refresh-scores")}>Atualizar scores</button>
+            <button style={buttonStyle()} onClick={() => handleAction("Atualização de insights", "/api/gbp/refresh-insights")}>Gerar insights</button>
             <button style={buttonStyle()} onClick={loadDashboard}>Atualizar dashboard</button>
             <button style={buttonStyle()} onClick={handleLogout}>Sair</button>
           </div>
@@ -301,7 +323,7 @@ function App() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+            gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
             gap: 16,
             marginBottom: 20
           }}
@@ -312,16 +334,43 @@ function App() {
           <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Prospects</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalProspects ?? 0}</div></div>
           <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Com site</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalWithWebsite ?? 0}</div></div>
           <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Verificados</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalVerified ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Alta prioridade</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.highPriority ?? 0}</div></div>
         </div>
 
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1.2fr 1fr",
+            gridTemplateColumns: "1fr 1fr",
             gap: 20,
             marginBottom: 20
           }}
         >
+          <div style={cardStyle()}>
+            <div style={{ marginBottom: 14, fontWeight: 700 }}>Top oportunidades</div>
+            <div style={{ overflow: "auto", maxHeight: 320 }}>
+              {topOpportunities.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    borderBottom: "1px solid #f0f2f5",
+                    padding: "12px 0"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <strong>{item.businessName}</strong>
+                    <span style={badgeStyle(item.priorityLevel)}>{item.priorityLevel}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
+                    {item.accountDisplayName || "-"} • Score {item.score}
+                  </div>
+                  <div style={{ fontSize: 13, marginTop: 6 }}>
+                    {item.priorityReason || "Sem motivo registrado."}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div style={cardStyle()}>
             <div style={{ marginBottom: 14, fontWeight: 700 }}>Resumo por conta</div>
             <div style={{ overflow: "auto", maxHeight: 320 }}>
@@ -332,7 +381,6 @@ function App() {
                     <th style={{ padding: "10px 8px" }}>Perfis</th>
                     <th style={{ padding: "10px 8px" }}>Clientes</th>
                     <th style={{ padding: "10px 8px" }}>Prospects</th>
-                    <th style={{ padding: "10px 8px" }}>Com site</th>
                     <th style={{ padding: "10px 8px" }}>Score médio</th>
                   </tr>
                 </thead>
@@ -343,32 +391,7 @@ function App() {
                       <td style={{ padding: "10px 8px" }}>{item.profiles}</td>
                       <td style={{ padding: "10px 8px" }}>{item.clients}</td>
                       <td style={{ padding: "10px 8px" }}>{item.prospects}</td>
-                      <td style={{ padding: "10px 8px" }}>{item.withWebsite}</td>
                       <td style={{ padding: "10px 8px", fontWeight: 700 }}>{item.avgScore}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div style={cardStyle()}>
-            <div style={{ marginBottom: 14, fontWeight: 700 }}>Top perfis por score</div>
-            <div style={{ overflow: "auto", maxHeight: 320 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
-                    <th style={{ padding: "10px 8px" }}>Empresa</th>
-                    <th style={{ padding: "10px 8px" }}>Conta</th>
-                    <th style={{ padding: "10px 8px" }}>Score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topProfiles.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: "1px solid #f0f2f5" }}>
-                      <td style={{ padding: "10px 8px" }}>{item.businessName}</td>
-                      <td style={{ padding: "10px 8px" }}>{item.accountDisplayName || "-"}</td>
-                      <td style={{ padding: "10px 8px", fontWeight: 700 }}>{item.score}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -427,11 +450,11 @@ function App() {
                   <th style={{ padding: "10px 8px" }}>Empresa</th>
                   <th style={{ padding: "10px 8px" }}>Conta</th>
                   <th style={{ padding: "10px 8px" }}>Tipo</th>
+                  <th style={{ padding: "10px 8px" }}>Prioridade</th>
                   <th style={{ padding: "10px 8px" }}>Score</th>
-                  <th style={{ padding: "10px 8px" }}>Categoria</th>
                   <th style={{ padding: "10px 8px" }}>Cidade</th>
                   <th style={{ padding: "10px 8px" }}>Site</th>
-                  <th style={{ padding: "10px 8px" }}>Verificado</th>
+                  <th style={{ padding: "10px 8px" }}>Resumo IA</th>
                   <th style={{ padding: "10px 8px" }}>Ações</th>
                 </tr>
               </thead>
@@ -441,13 +464,19 @@ function App() {
                     <td style={{ padding: "10px 8px" }}>{row.businessName}</td>
                     <td style={{ padding: "10px 8px" }}>{row.accountDisplayName || "-"}</td>
                     <td style={{ padding: "10px 8px" }}>{row.leadType}</td>
+                    <td style={{ padding: "10px 8px" }}>
+                      <span style={badgeStyle(row.priorityLevel)}>{row.priorityLevel}</span>
+                    </td>
                     <td style={{ padding: "10px 8px", fontWeight: 700 }}>{row.score}</td>
-                    <td style={{ padding: "10px 8px" }}>{row.primaryCategory || "-"}</td>
                     <td style={{ padding: "10px 8px" }}>{[row.city, row.state].filter(Boolean).join(" / ") || "-"}</td>
                     <td style={{ padding: "10px 8px" }}>
                       {row.website ? <a href={row.website} target="_blank" rel="noreferrer">abrir</a> : "-"}
                     </td>
-                    <td style={{ padding: "10px 8px" }}>{row.isVerified ? "Sim" : "Não"}</td>
+                    <td style={{ padding: "10px 8px", maxWidth: 320 }}>
+                      <span style={{ fontSize: 13, color: "#4b5563" }}>
+                        {row.aiSummary || "-"}
+                      </span>
+                    </td>
                     <td style={{ padding: "10px 8px" }}>
                       <button
                         style={buttonStyle()}
@@ -459,7 +488,8 @@ function App() {
                             state: row.state || "",
                             phone: row.phone || "",
                             website: row.website || "",
-                            leadType: row.leadType || "prospect"
+                            leadType: row.leadType || "prospect",
+                            notes: row.notes || ""
                           });
                         }}
                       >
@@ -524,16 +554,23 @@ function App() {
               </select>
             </div>
 
+            <textarea
+              placeholder="Notas internas"
+              value={editForm.notes}
+              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+              style={{
+                width: "100%",
+                marginTop: 12,
+                minHeight: 100,
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid #d1d5db"
+              }}
+            />
+
             <div style={{ display: "flex", gap: 12, marginTop: 14 }}>
-              <button style={buttonStyle()} onClick={handleSaveBusiness}>
-                Salvar
-              </button>
-              <button
-                style={buttonStyle()}
-                onClick={() => setEditingBusinessId(null)}
-              >
-                Cancelar
-              </button>
+              <button style={buttonStyle()} onClick={handleSaveBusiness}>Salvar</button>
+              <button style={buttonStyle()} onClick={() => setEditingBusinessId(null)}>Cancelar</button>
             </div>
           </div>
         ) : null}
