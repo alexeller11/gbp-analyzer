@@ -77,6 +77,7 @@ export const businesses = pgTable(
     source: text("source").default("google_import").notNull(),
     status: text("status").default("active").notNull(),
     leadType: text("lead_type").default("client").notNull(),
+    pipelineStage: text("pipeline_stage").default("new").notNull(),
     score: integer("score").default(0).notNull(),
     priorityLevel: text("priority_level").default("low").notNull(),
     priorityReason: text("priority_reason"),
