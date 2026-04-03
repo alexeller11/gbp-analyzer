@@ -17,10 +17,7 @@ function parseAddress(profile: any) {
   const address = profile?.storefrontAddress;
 
   if (!address) {
-    return {
-      city: null,
-      state: null
-    };
+    return { city: null, state: null };
   }
 
   return {
@@ -32,10 +29,8 @@ function parseAddress(profile: any) {
 function parsePrimaryCategory(profile: any) {
   const category = profile?.primaryCategory;
   if (!category) return null;
-
   if (category.displayName) return String(category.displayName);
   if (category.name) return String(category.name);
-
   return null;
 }
 
@@ -51,13 +46,10 @@ function parseWebsite(profile: any) {
 
 function parseVerificationState(profile: any) {
   const metadata = profile?.metadata;
-
   if (!metadata) return null;
-
   if (metadata.verification?.verificationState) {
     return String(metadata.verification.verificationState);
   }
-
   return null;
 }
 
@@ -140,28 +132,11 @@ async function fetchLocationDetailsWithMask(
   };
 }
 
-async function fetchLocationDetails(
-  accessToken: string,
-  googleLocationName: string
-) {
+async function fetchLocationDetails(accessToken: string, googleLocationName: string) {
   const masks = [
-    [
-      "name",
-      "title",
-      "storeCode",
-      "languageCode",
-      "websiteUri",
-      "phoneNumbers",
-      "storefrontAddress",
-      "primaryCategory"
-    ].join(","),
-    [
-      "name",
-      "title",
-      "storeCode",
-      "languageCode",
-      "websiteUri"
-    ].join(",")
+    "name,title,storeCode,languageCode,websiteUri,phoneNumbers,storefrontAddress,primaryCategory",
+    "name,title,storeCode,languageCode,websiteUri",
+    "name,title"
   ];
 
   for (const mask of masks) {
@@ -180,23 +155,9 @@ async function fetchLocationDetails(
     }
   }
 
-  const lastAttempt = await fetchLocationDetailsWithMask(
-    accessToken,
-    googleLocationName,
-    "name,title"
-  );
-
-  if (lastAttempt.ok) {
-    return {
-      ok: true as const,
-      location: lastAttempt.location,
-      usedMask: "name,title"
-    };
-  }
-
   return {
     ok: false as const,
-    error: lastAttempt.error,
+    error: "detail_fetch_failed",
     location: null,
     usedMask: null
   };
@@ -228,9 +189,7 @@ export async function importGoogleBusinessAccounts(userId: number) {
   for (const account of accounts) {
     const googleAccountName = String(account.name || "");
     const accountId = extractAccountId(googleAccountName);
-    const accountDisplayName = account.accountName
-      ? String(account.accountName)
-      : null;
+    const accountDisplayName = account.accountName ? String(account.accountName) : null;
     const accountType = account.type ? String(account.type) : null;
 
     const existing = await db.query.gbpAccounts.findFirst({
@@ -301,17 +260,9 @@ export async function importGoogleBusinessLocations(userId: number) {
   for (const account of accounts) {
     accountsProcessed += 1;
 
-    const result = await fetchAllLocationsForAccount(
-      accessToken,
-      account.googleAccountName
-    );
+    const result = await fetchAllLocationsForAccount(accessToken, account.googleAccountName);
 
     if (!result.ok) {
-      console.error(
-        `Erro ao buscar locations da conta ${account.googleAccountName}:`,
-        result.error
-      );
-
       accountDiagnostics.push({
         accountId: account.accountId,
         accountDisplayName: account.accountDisplayName,
@@ -321,7 +272,6 @@ export async function importGoogleBusinessLocations(userId: number) {
         status: "error",
         error: result.error
       });
-
       continue;
     }
 
@@ -340,18 +290,11 @@ export async function importGoogleBusinessLocations(userId: number) {
       const googleLocationName = String(rawProfile.name || "");
       const locationId = extractLocationId(googleLocationName);
 
-      const detailResult = await fetchLocationDetails(
-        accessToken,
-        googleLocationName
-      );
-
+      const detailResult = await fetchLocationDetails(accessToken, googleLocationName);
       const profile =
-        detailResult.ok && detailResult.location
-          ? detailResult.location
-          : rawProfile;
+        detailResult.ok && detailResult.location ? detailResult.location : rawProfile;
 
       const title = profile.title ? String(profile.title) : "Sem título";
-
       const { city, state } = parseAddress(profile);
       const primaryCategory = parsePrimaryCategory(profile);
       const phone = parsePhone(profile);
@@ -391,11 +334,11 @@ export async function importGoogleBusinessLocations(userId: number) {
           .update(businesses)
           .set({
             name: title,
-            primaryCategory,
-            city,
-            state,
-            phone,
-            website,
+            primaryCategory: primaryCategory ?? business.primaryCategory,
+            city: city ?? business.city,
+            state: state ?? business.state,
+            phone: phone ?? business.phone,
+            website: website ?? business.website,
             updatedAt: new Date()
           })
           .where(eq(businesses.id, business.id))
@@ -423,7 +366,7 @@ export async function importGoogleBusinessLocations(userId: number) {
           languageCode: profile.languageCode ? String(profile.languageCode) : null,
           verificationState,
           isVerified,
-          metadataJson: null,
+          metadataJson: profile.metadata || null,
           profileJson: profile,
           lastImportedAt: new Date(),
           lastSyncedAt: new Date(),
@@ -440,9 +383,9 @@ export async function importGoogleBusinessLocations(userId: number) {
             title,
             storeCode: profile.storeCode ? String(profile.storeCode) : null,
             languageCode: profile.languageCode ? String(profile.languageCode) : null,
-            verificationState,
-            isVerified,
-            metadataJson: null,
+            verificationState: verificationState ?? existingLocation.verificationState,
+            isVerified: isVerified || existingLocation.isVerified,
+            metadataJson: profile.metadata || existingLocation.metadataJson,
             profileJson: profile,
             lastImportedAt: new Date(),
             lastSyncedAt: new Date(),
@@ -490,10 +433,7 @@ export async function syncGoogleBusinessLocationDetails(userId: number) {
   const sample: any[] = [];
 
   for (const location of locations) {
-    const detailResult = await fetchLocationDetails(
-      accessToken,
-      location.googleLocationName
-    );
+    const detailResult = await fetchLocationDetails(accessToken, location.googleLocationName);
 
     if (!detailResult.ok || !detailResult.location) {
       errors.push({
@@ -519,9 +459,9 @@ export async function syncGoogleBusinessLocationDetails(userId: number) {
         title,
         storeCode: profile.storeCode ? String(profile.storeCode) : null,
         languageCode: profile.languageCode ? String(profile.languageCode) : null,
-        verificationState,
-        isVerified,
-        metadataJson: null,
+        verificationState: verificationState ?? location.verificationState,
+        isVerified: isVerified || location.isVerified,
+        metadataJson: profile.metadata || location.metadataJson,
         profileJson: profile,
         lastSyncedAt: new Date(),
         updatedAt: new Date()
@@ -543,14 +483,7 @@ export async function syncGoogleBusinessLocationDetails(userId: number) {
 
     synced += 1;
 
-    if (
-      primaryCategory ||
-      city ||
-      state ||
-      phone ||
-      website ||
-      verificationState
-    ) {
+    if (primaryCategory || city || state || phone || website || verificationState) {
       enriched += 1;
     }
 
