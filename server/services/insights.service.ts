@@ -12,36 +12,42 @@ function classifyPriority(params: {
 }) {
   if (params.score >= 55) {
     return {
-      priorityLevel: "high",
-      priorityReason: "Perfil mais completo, com maior potencial de presença consolidada."
+      priorityLevel: "low",
+      priorityReason: "Ficha em bom estado geral. Mantém acompanhamento regular."
     };
   }
 
   if (params.website && !params.phone) {
     return {
       priorityLevel: "medium",
-      priorityReason: "Tem presença digital, mas ainda faltam dados estratégicos para fortalecer a ficha."
+      priorityReason: "Tem boa base, mas ainda faltam dados importantes para fortalecer a ficha."
     };
   }
 
   if (!params.website && !params.phone && !params.city && !params.primaryCategory) {
     return {
       priorityLevel: "high",
-      priorityReason: "Perfil com baixa estrutura. Boa oportunidade para otimização e ganho rápido."
+      priorityReason: "Ficha com baixa completude. Boa candidata para ação prioritária da agência."
     };
   }
 
   if (params.isVerified) {
     return {
       priorityLevel: "medium",
-      priorityReason: "Perfil já validado, com espaço para refinamento e crescimento."
+      priorityReason: "Ficha validada, mas ainda com espaço para otimização operacional."
     };
   }
 
   return {
-    priorityLevel: "low",
-    priorityReason: "Perfil em estágio intermediário, com menor urgência comercial no momento."
+    priorityLevel: "medium",
+    priorityReason: "Perfil em estágio intermediário e merece acompanhamento."
   };
+}
+
+function inferServiceStatus(score: number, isVerified: boolean) {
+  if (score < 20 && !isVerified) return "urgent";
+  if (score < 40) return "attention";
+  return "active";
 }
 
 function buildAiSummary(params: {
@@ -64,9 +70,9 @@ function buildAiSummary(params: {
   const missingText =
     missing.length > 0
       ? `Ainda faltam ${missing.join(", ")}.`
-      : "O perfil já tem uma boa base de informações.";
+      : "A ficha já tem uma boa base de informações.";
 
-  return `${params.name} está com score ${params.score}/100. ${missingText} ${params.priorityReason}`;
+  return `${params.name} está com health score ${params.score}/100. ${missingText} ${params.priorityReason}`;
 }
 
 export async function refreshBusinessInsights(userId: number) {
@@ -90,6 +96,7 @@ export async function refreshBusinessInsights(userId: number) {
 
   for (const business of allBusinesses) {
     const location = locationByBusinessId.get(business.id);
+    const isVerified = location?.isVerified || false;
 
     const priority = classifyPriority({
       score: business.score,
@@ -97,8 +104,10 @@ export async function refreshBusinessInsights(userId: number) {
       phone: business.phone,
       city: business.city,
       primaryCategory: business.primaryCategory,
-      isVerified: location?.isVerified || false
+      isVerified
     });
+
+    const serviceStatus = inferServiceStatus(business.score, isVerified);
 
     const aiSummary = buildAiSummary({
       name: business.name,
@@ -114,6 +123,7 @@ export async function refreshBusinessInsights(userId: number) {
     await db
       .update(businesses)
       .set({
+        serviceStatus,
         priorityLevel: priority.priorityLevel,
         priorityReason: priority.priorityReason,
         aiSummary,
