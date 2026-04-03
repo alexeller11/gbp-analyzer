@@ -34,6 +34,17 @@ type DashboardRow = {
   leadType: string;
 };
 
+type AccountSummary = {
+  accountId: string;
+  accountDisplayName: string | null;
+  accountType: string | null;
+  profiles: number;
+  clients: number;
+  prospects: number;
+  withWebsite: number;
+  avgScore: number;
+};
+
 type DashboardResponse = {
   ok?: boolean;
   summary?: {
@@ -44,6 +55,8 @@ type DashboardResponse = {
     totalWithWebsite: number;
     totalVerified: number;
   };
+  accountsSummary?: AccountSummary[];
+  topProfiles?: DashboardRow[];
   rows?: DashboardRow[];
 };
 
@@ -51,9 +64,19 @@ function cardStyle(): React.CSSProperties {
   return {
     background: "#fff",
     border: "1px solid #e5e7eb",
-    borderRadius: 14,
-    padding: 16,
-    boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+    borderRadius: 16,
+    padding: 18,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.04)"
+  };
+}
+
+function buttonStyle(): React.CSSProperties {
+  return {
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    cursor: "pointer"
   };
 }
 
@@ -67,6 +90,15 @@ function App() {
   const [accountFilter, setAccountFilter] = React.useState("all");
   const [leadFilter, setLeadFilter] = React.useState("all");
   const [working, setWorking] = React.useState<string | null>(null);
+  const [editingBusinessId, setEditingBusinessId] = React.useState<number | null>(null);
+  const [editForm, setEditForm] = React.useState({
+    primaryCategory: "",
+    city: "",
+    state: "",
+    phone: "",
+    website: "",
+    leadType: "prospect"
+  });
 
   async function loadMe() {
     const res = await fetch("/api/auth/me", {
@@ -81,7 +113,6 @@ function App() {
     const res = await fetch("/api/gbp/dashboard", {
       credentials: "include"
     });
-
     const data = await res.json();
     setDashboard(data);
   }
@@ -96,10 +127,7 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  async function handleAction(
-    label: string,
-    endpoint: string
-  ) {
+  async function handleAction(label: string, endpoint: string) {
     setWorking(label);
     setMessage("");
     setLastResult(null);
@@ -119,6 +147,38 @@ function App() {
 
       setLastResult(data.result);
       setMessage(`${label} concluído com sucesso.`);
+      await loadDashboard();
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  async function handleSaveBusiness() {
+    if (!editingBusinessId) return;
+
+    setWorking("Salvar empresa");
+    setMessage("");
+
+    try {
+      const res = await fetch(`/api/gbp/businesses/${editingBusinessId}/update`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        credentials: "include",
+        body: JSON.stringify(editForm)
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessage(data?.error || "Erro ao salvar empresa");
+        return;
+      }
+
+      setMessage("Empresa atualizada com sucesso.");
+      setEditingBusinessId(null);
+      await handleAction("Atualização de scores", "/api/gbp/refresh-scores");
       await loadDashboard();
     } finally {
       setWorking(null);
@@ -151,6 +211,13 @@ function App() {
   }
 
   const rows = Array.isArray(dashboard?.rows) ? dashboard!.rows! : [];
+  const accountsSummary = Array.isArray(dashboard?.accountsSummary)
+    ? dashboard!.accountsSummary!
+    : [];
+  const topProfiles = Array.isArray(dashboard?.topProfiles)
+    ? dashboard!.topProfiles!
+    : [];
+
   const accounts = Array.from(
     new Map(
       rows
@@ -184,7 +251,7 @@ function App() {
         color: "#111827"
       }}
     >
-      <div style={{ maxWidth: 1400, margin: "0 auto", padding: 24 }}>
+      <div style={{ maxWidth: 1450, margin: "0 auto", padding: 24 }}>
         <div
           style={{
             ...cardStyle(),
@@ -203,20 +270,20 @@ function App() {
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button onClick={() => handleAction("Importação de contas", "/api/gbp/import")}>
+            <button style={buttonStyle()} onClick={() => handleAction("Importação de contas", "/api/gbp/import")}>
               {working === "Importação de contas" ? "Processando..." : "Importar contas"}
             </button>
-            <button onClick={() => handleAction("Importação de perfis", "/api/gbp/import-locations")}>
+            <button style={buttonStyle()} onClick={() => handleAction("Importação de perfis", "/api/gbp/import-locations")}>
               {working === "Importação de perfis" ? "Processando..." : "Importar perfis"}
             </button>
-            <button onClick={() => handleAction("Sincronização de detalhes", "/api/gbp/sync-location-details")}>
+            <button style={buttonStyle()} onClick={() => handleAction("Sincronização de detalhes", "/api/gbp/sync-location-details")}>
               {working === "Sincronização de detalhes" ? "Processando..." : "Sincronizar detalhes"}
             </button>
-            <button onClick={() => handleAction("Atualização de scores", "/api/gbp/refresh-scores")}>
+            <button style={buttonStyle()} onClick={() => handleAction("Atualização de scores", "/api/gbp/refresh-scores")}>
               {working === "Atualização de scores" ? "Processando..." : "Atualizar scores"}
             </button>
-            <button onClick={loadDashboard}>Atualizar dashboard</button>
-            <button onClick={handleLogout}>Sair</button>
+            <button style={buttonStyle()} onClick={loadDashboard}>Atualizar dashboard</button>
+            <button style={buttonStyle()} onClick={handleLogout}>Sair</button>
           </div>
         </div>
 
@@ -239,40 +306,73 @@ function App() {
             marginBottom: 20
           }}
         >
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Perfis</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalProfiles ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Contas</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalAccounts ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Clientes</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalClients ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Prospects</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalProspects ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Com site</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalWithWebsite ?? 0}</div></div>
+          <div style={cardStyle()}><div style={{ fontSize: 12, color: "#6b7280" }}>Verificados</div><div style={{ fontSize: 28, fontWeight: 700 }}>{dashboard?.summary?.totalVerified ?? 0}</div></div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.2fr 1fr",
+            gap: 20,
+            marginBottom: 20
+          }}
+        >
           <div style={cardStyle()}>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Perfis</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>
-              {dashboard?.summary?.totalProfiles ?? 0}
+            <div style={{ marginBottom: 14, fontWeight: 700 }}>Resumo por conta</div>
+            <div style={{ overflow: "auto", maxHeight: 320 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
+                    <th style={{ padding: "10px 8px" }}>Conta</th>
+                    <th style={{ padding: "10px 8px" }}>Perfis</th>
+                    <th style={{ padding: "10px 8px" }}>Clientes</th>
+                    <th style={{ padding: "10px 8px" }}>Prospects</th>
+                    <th style={{ padding: "10px 8px" }}>Com site</th>
+                    <th style={{ padding: "10px 8px" }}>Score médio</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accountsSummary.map((item) => (
+                    <tr key={item.accountId} style={{ borderBottom: "1px solid #f0f2f5" }}>
+                      <td style={{ padding: "10px 8px" }}>{item.accountDisplayName || item.accountId}</td>
+                      <td style={{ padding: "10px 8px" }}>{item.profiles}</td>
+                      <td style={{ padding: "10px 8px" }}>{item.clients}</td>
+                      <td style={{ padding: "10px 8px" }}>{item.prospects}</td>
+                      <td style={{ padding: "10px 8px" }}>{item.withWebsite}</td>
+                      <td style={{ padding: "10px 8px", fontWeight: 700 }}>{item.avgScore}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
+
           <div style={cardStyle()}>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Contas</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>
-              {dashboard?.summary?.totalAccounts ?? 0}
-            </div>
-          </div>
-          <div style={cardStyle()}>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Clientes</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>
-              {dashboard?.summary?.totalClients ?? 0}
-            </div>
-          </div>
-          <div style={cardStyle()}>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Prospects</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>
-              {dashboard?.summary?.totalProspects ?? 0}
-            </div>
-          </div>
-          <div style={cardStyle()}>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Com site</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>
-              {dashboard?.summary?.totalWithWebsite ?? 0}
-            </div>
-          </div>
-          <div style={cardStyle()}>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Verificados</div>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>
-              {dashboard?.summary?.totalVerified ?? 0}
+            <div style={{ marginBottom: 14, fontWeight: 700 }}>Top perfis por score</div>
+            <div style={{ overflow: "auto", maxHeight: 320 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
+                    <th style={{ padding: "10px 8px" }}>Empresa</th>
+                    <th style={{ padding: "10px 8px" }}>Conta</th>
+                    <th style={{ padding: "10px 8px" }}>Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topProfiles.map((item) => (
+                    <tr key={item.id} style={{ borderBottom: "1px solid #f0f2f5" }}>
+                      <td style={{ padding: "10px 8px" }}>{item.businessName}</td>
+                      <td style={{ padding: "10px 8px" }}>{item.accountDisplayName || "-"}</td>
+                      <td style={{ padding: "10px 8px", fontWeight: 700 }}>{item.score}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -299,9 +399,7 @@ function App() {
             >
               <option value="all">Todas as contas</option>
               {accounts.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
+                <option key={id} value={id}>{name}</option>
               ))}
             </select>
 
@@ -334,6 +432,7 @@ function App() {
                   <th style={{ padding: "10px 8px" }}>Cidade</th>
                   <th style={{ padding: "10px 8px" }}>Site</th>
                   <th style={{ padding: "10px 8px" }}>Verificado</th>
+                  <th style={{ padding: "10px 8px" }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -344,20 +443,28 @@ function App() {
                     <td style={{ padding: "10px 8px" }}>{row.leadType}</td>
                     <td style={{ padding: "10px 8px", fontWeight: 700 }}>{row.score}</td>
                     <td style={{ padding: "10px 8px" }}>{row.primaryCategory || "-"}</td>
+                    <td style={{ padding: "10px 8px" }}>{[row.city, row.state].filter(Boolean).join(" / ") || "-"}</td>
                     <td style={{ padding: "10px 8px" }}>
-                      {[row.city, row.state].filter(Boolean).join(" / ") || "-"}
+                      {row.website ? <a href={row.website} target="_blank" rel="noreferrer">abrir</a> : "-"}
                     </td>
+                    <td style={{ padding: "10px 8px" }}>{row.isVerified ? "Sim" : "Não"}</td>
                     <td style={{ padding: "10px 8px" }}>
-                      {row.website ? (
-                        <a href={row.website} target="_blank" rel="noreferrer">
-                          abrir
-                        </a>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td style={{ padding: "10px 8px" }}>
-                      {row.isVerified ? "Sim" : "Não"}
+                      <button
+                        style={buttonStyle()}
+                        onClick={() => {
+                          setEditingBusinessId(row.businessId || null);
+                          setEditForm({
+                            primaryCategory: row.primaryCategory || "",
+                            city: row.city || "",
+                            state: row.state || "",
+                            phone: row.phone || "",
+                            website: row.website || "",
+                            leadType: row.leadType || "prospect"
+                          });
+                        }}
+                      >
+                        Editar
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -365,6 +472,71 @@ function App() {
             </table>
           </div>
         </div>
+
+        {editingBusinessId ? (
+          <div style={{ ...cardStyle(), marginTop: 20 }}>
+            <div style={{ marginBottom: 12, fontWeight: 700 }}>Editar empresa</div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                gap: 12
+              }}
+            >
+              <input
+                placeholder="Categoria"
+                value={editForm.primaryCategory}
+                onChange={(e) => setEditForm({ ...editForm, primaryCategory: e.target.value })}
+                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
+              />
+              <input
+                placeholder="Cidade"
+                value={editForm.city}
+                onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
+                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
+              />
+              <input
+                placeholder="Estado"
+                value={editForm.state}
+                onChange={(e) => setEditForm({ ...editForm, state: e.target.value })}
+                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
+              />
+              <input
+                placeholder="Telefone"
+                value={editForm.phone}
+                onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
+              />
+              <input
+                placeholder="Website"
+                value={editForm.website}
+                onChange={(e) => setEditForm({ ...editForm, website: e.target.value })}
+                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
+              />
+              <select
+                value={editForm.leadType}
+                onChange={(e) => setEditForm({ ...editForm, leadType: e.target.value })}
+                style={{ padding: 12, borderRadius: 10, border: "1px solid #d1d5db" }}
+              >
+                <option value="client">Cliente</option>
+                <option value="prospect">Prospect</option>
+              </select>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 14 }}>
+              <button style={buttonStyle()} onClick={handleSaveBusiness}>
+                Salvar
+              </button>
+              <button
+                style={buttonStyle()}
+                onClick={() => setEditingBusinessId(null)}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
