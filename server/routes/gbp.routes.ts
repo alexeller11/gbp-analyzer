@@ -50,7 +50,6 @@ router.post("/api/gbp/import", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
     const result = await importGoogleBusinessAccounts(userId);
-
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao importar contas GBP:", error);
@@ -65,7 +64,6 @@ router.post("/api/gbp/import-locations", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
     const result = await importGoogleBusinessLocations(userId);
-
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao importar locations GBP:", error);
@@ -80,7 +78,6 @@ router.post("/api/gbp/sync-location-details", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
     const result = await syncGoogleBusinessLocationDetails(userId);
-
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao sincronizar detalhes das locations:", error);
@@ -95,7 +92,6 @@ router.post("/api/gbp/refresh-scores", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
     const result = await refreshBusinessScores(userId);
-
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao atualizar scores:", error);
@@ -106,11 +102,63 @@ router.post("/api/gbp/refresh-scores", async (req, res) => {
   }
 });
 
+router.post("/api/gbp/businesses/:businessId/update", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const businessId = Number(req.params.businessId);
+
+    if (!Number.isFinite(businessId) || businessId <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "businessId inválido"
+      });
+    }
+
+    const existing = await db.query.businesses.findFirst({
+      where: eq(businesses.id, businessId)
+    });
+
+    if (!existing || existing.userId !== userId) {
+      return res.status(404).json({
+        ok: false,
+        error: "Empresa não encontrada"
+      });
+    }
+
+    const payload = req.body || {};
+
+    const [updated] = await db
+      .update(businesses)
+      .set({
+        name: payload.name ?? existing.name,
+        primaryCategory: payload.primaryCategory ?? existing.primaryCategory,
+        city: payload.city ?? existing.city,
+        state: payload.state ?? existing.state,
+        phone: payload.phone ?? existing.phone,
+        website: payload.website ?? existing.website,
+        leadType: payload.leadType ?? existing.leadType,
+        updatedAt: new Date()
+      })
+      .where(eq(businesses.id, businessId))
+      .returning();
+
+    return res.status(200).json({
+      ok: true,
+      business: updated
+    });
+  } catch (error: any) {
+    console.error("Erro ao atualizar empresa:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao atualizar empresa"
+    });
+  }
+});
+
 router.get("/api/gbp/dashboard", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
     const result = await getAgencyDashboard(userId);
-
     return res.status(200).json({
       ok: true,
       ...result
