@@ -52,7 +52,9 @@ export async function refreshBusinessScores(userId: number) {
       isVerified: location.isVerified
     });
 
-    const leadType = inferLeadType(score);
+    const leadType = business.leadType === "client" || business.leadType === "prospect"
+      ? business.leadType
+      : inferLeadType(score);
 
     await db
       .update(businesses)
@@ -119,6 +121,30 @@ export async function getAgencyDashboard(userId: number) {
   const totalWithWebsite = rows.filter((item) => !!item.website).length;
   const totalVerified = rows.filter((item) => item.isVerified).length;
 
+  const accountsSummary = allAccounts.map((account) => {
+    const accountRows = rows.filter((row) => row.accountId === account.accountId);
+
+    return {
+      accountId: account.accountId,
+      accountDisplayName: account.accountDisplayName,
+      accountType: account.accountType,
+      profiles: accountRows.length,
+      clients: accountRows.filter((item) => item.leadType === "client").length,
+      prospects: accountRows.filter((item) => item.leadType === "prospect").length,
+      withWebsite: accountRows.filter((item) => !!item.website).length,
+      avgScore:
+        accountRows.length > 0
+          ? Math.round(
+              accountRows.reduce((sum, item) => sum + item.score, 0) / accountRows.length
+            )
+          : 0
+    };
+  });
+
+  const topProfiles = [...rows]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
+
   return {
     summary: {
       totalProfiles,
@@ -128,6 +154,8 @@ export async function getAgencyDashboard(userId: number) {
       totalWithWebsite,
       totalVerified
     },
+    accountsSummary,
+    topProfiles,
     rows
   };
 }
