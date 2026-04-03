@@ -13,17 +13,34 @@ import { refreshBusinessInsights } from "../services/insights.service.ts";
 const router = Router();
 
 function getGoogleImportFunctions() {
-  const importAccounts = googleImportService.importGoogleBusinessAccounts;
-  const importLocations = googleImportService.importGoogleBusinessLocations;
-  const syncLocationDetails = googleImportService.syncGoogleBusinessLocationDetails;
+  const defaultExport =
+    (googleImportService as any).default && typeof (googleImportService as any).default === "object"
+      ? (googleImportService as any).default
+      : {};
+
+  const importAccounts =
+    googleImportService.importGoogleBusinessAccounts ||
+    defaultExport.importGoogleBusinessAccounts ||
+    defaultExport.importAccounts;
+  const importLocations =
+    googleImportService.importGoogleBusinessLocations ||
+    defaultExport.importGoogleBusinessLocations ||
+    defaultExport.importLocations;
+  const syncLocationDetails =
+    googleImportService.syncGoogleBusinessLocationDetails ||
+    defaultExport.syncGoogleBusinessLocationDetails ||
+    defaultExport.syncLocationDetails;
 
   if (
     typeof importAccounts !== "function" ||
     typeof importLocations !== "function" ||
     typeof syncLocationDetails !== "function"
   ) {
+    const available = Object.keys(googleImportService);
+    const availableDefault = Object.keys(defaultExport);
+
     throw new Error(
-      "Serviço de importação GBP inválido: exports esperados não encontrados."
+      `Serviço de importação GBP inválido. Exports disponíveis: ${available.join(", ") || "nenhum"}; default: ${availableDefault.join(", ") || "nenhum"}`
     );
   }
 
