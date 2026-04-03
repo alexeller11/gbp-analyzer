@@ -12,6 +12,7 @@ import {
   refreshBusinessScores,
   getAgencyDashboard
 } from "../services/dashboard.service.ts";
+import { refreshBusinessInsights } from "../services/insights.service.ts";
 
 const router = Router();
 
@@ -102,6 +103,20 @@ router.post("/api/gbp/refresh-scores", async (req, res) => {
   }
 });
 
+router.post("/api/gbp/refresh-insights", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const result = await refreshBusinessInsights(userId);
+    return res.status(200).json({ ok: true, result });
+  } catch (error: any) {
+    console.error("Erro ao atualizar insights:", error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message || "Erro ao atualizar insights"
+    });
+  }
+});
+
 router.post("/api/gbp/businesses/:businessId/update", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
@@ -137,6 +152,7 @@ router.post("/api/gbp/businesses/:businessId/update", async (req, res) => {
         phone: payload.phone ?? existing.phone,
         website: payload.website ?? existing.website,
         leadType: payload.leadType ?? existing.leadType,
+        notes: payload.notes ?? existing.notes,
         updatedAt: new Date()
       })
       .where(eq(businesses.id, businessId))
@@ -249,7 +265,11 @@ router.get("/api/gbp/locations", async (req, res) => {
               phone: businessMap.get(location.businessId)!.phone,
               website: businessMap.get(location.businessId)!.website,
               score: businessMap.get(location.businessId)!.score,
-              leadType: businessMap.get(location.businessId)!.leadType
+              leadType: businessMap.get(location.businessId)!.leadType,
+              priorityLevel: businessMap.get(location.businessId)!.priorityLevel,
+              priorityReason: businessMap.get(location.businessId)!.priorityReason,
+              aiSummary: businessMap.get(location.businessId)!.aiSummary,
+              notes: businessMap.get(location.businessId)!.notes
             }
           : null
       }))
