@@ -54,10 +54,7 @@ router.post("/api/gbp/import", async (req, res) => {
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao importar contas GBP:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao importar contas GBP"
-    });
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao importar contas GBP" });
   }
 });
 
@@ -68,10 +65,7 @@ router.post("/api/gbp/import-locations", async (req, res) => {
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao importar locations GBP:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao importar locations GBP"
-    });
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao importar locations GBP" });
   }
 });
 
@@ -82,10 +76,7 @@ router.post("/api/gbp/sync-location-details", async (req, res) => {
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao sincronizar detalhes das locations:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao sincronizar detalhes das locations"
-    });
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao sincronizar detalhes das locations" });
   }
 });
 
@@ -96,10 +87,7 @@ router.post("/api/gbp/refresh-scores", async (req, res) => {
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao atualizar scores:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao atualizar scores"
-    });
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao atualizar scores" });
   }
 });
 
@@ -110,10 +98,7 @@ router.post("/api/gbp/refresh-insights", async (req, res) => {
     return res.status(200).json({ ok: true, result });
   } catch (error: any) {
     console.error("Erro ao atualizar insights:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao atualizar insights"
-    });
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao atualizar insights" });
   }
 });
 
@@ -123,10 +108,7 @@ router.post("/api/gbp/businesses/:businessId/update", async (req, res) => {
     const businessId = Number(req.params.businessId);
 
     if (!Number.isFinite(businessId) || businessId <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "businessId inválido"
-      });
+      return res.status(400).json({ ok: false, error: "businessId inválido" });
     }
 
     const existing = await db.query.businesses.findFirst({
@@ -134,10 +116,7 @@ router.post("/api/gbp/businesses/:businessId/update", async (req, res) => {
     });
 
     if (!existing || existing.userId !== userId) {
-      return res.status(404).json({
-        ok: false,
-        error: "Empresa não encontrada"
-      });
+      return res.status(404).json({ ok: false, error: "Empresa não encontrada" });
     }
 
     const payload = req.body || {};
@@ -152,22 +131,17 @@ router.post("/api/gbp/businesses/:businessId/update", async (req, res) => {
         phone: payload.phone ?? existing.phone,
         website: payload.website ?? existing.website,
         leadType: payload.leadType ?? existing.leadType,
+        pipelineStage: payload.pipelineStage ?? existing.pipelineStage,
         notes: payload.notes ?? existing.notes,
         updatedAt: new Date()
       })
       .where(eq(businesses.id, businessId))
       .returning();
 
-    return res.status(200).json({
-      ok: true,
-      business: updated
-    });
+    return res.status(200).json({ ok: true, business: updated });
   } catch (error: any) {
     console.error("Erro ao atualizar empresa:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao atualizar empresa"
-    });
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao atualizar empresa" });
   }
 });
 
@@ -175,16 +149,82 @@ router.get("/api/gbp/dashboard", async (req, res) => {
   try {
     const userId = await getAuthenticatedUserId(req);
     const result = await getAgencyDashboard(userId);
-    return res.status(200).json({
-      ok: true,
-      ...result
-    });
+    return res.status(200).json({ ok: true, ...result });
   } catch (error: any) {
     console.error("Erro ao carregar dashboard GBP:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao carregar dashboard GBP"
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao carregar dashboard GBP" });
+  }
+});
+
+router.get("/api/gbp/account/:accountId/dashboard", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const requestedAccountId = String(req.params.accountId);
+
+    const result = await getAgencyDashboard(userId);
+
+    const rows = result.rows.filter((item) => item.accountId === requestedAccountId);
+
+    return res.status(200).json({
+      ok: true,
+      account: result.accountsSummary.find((item) => item.accountId === requestedAccountId) || null,
+      rows
     });
+  } catch (error: any) {
+    console.error("Erro ao carregar dashboard da conta:", error);
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao carregar dashboard da conta" });
+  }
+});
+
+router.get("/api/gbp/export.csv", async (req, res) => {
+  try {
+    const userId = await getAuthenticatedUserId(req);
+    const result = await getAgencyDashboard(userId);
+
+    const header = [
+      "empresa",
+      "conta",
+      "tipo",
+      "pipeline",
+      "prioridade",
+      "score",
+      "categoria",
+      "cidade",
+      "estado",
+      "telefone",
+      "site",
+      "verificado"
+    ];
+
+    const lines = result.rows.map((row) => [
+      row.businessName,
+      row.accountDisplayName || "",
+      row.leadType,
+      row.pipelineStage,
+      row.priorityLevel,
+      String(row.score),
+      row.primaryCategory || "",
+      row.city || "",
+      row.state || "",
+      row.phone || "",
+      row.website || "",
+      row.isVerified ? "sim" : "nao"
+    ]);
+
+    const csv = [header, ...lines]
+      .map((line) =>
+        line
+          .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+          .join(",")
+      )
+      .join("\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="gbp-carteira.csv"');
+    return res.status(200).send(csv);
+  } catch (error: any) {
+    console.error("Erro ao exportar CSV:", error);
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao exportar CSV" });
   }
 });
 
@@ -211,10 +251,7 @@ router.get("/api/gbp/accounts", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Erro ao listar contas GBP:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao listar contas GBP"
-    });
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao listar contas GBP" });
   }
 });
 
@@ -266,6 +303,7 @@ router.get("/api/gbp/locations", async (req, res) => {
               website: businessMap.get(location.businessId)!.website,
               score: businessMap.get(location.businessId)!.score,
               leadType: businessMap.get(location.businessId)!.leadType,
+              pipelineStage: businessMap.get(location.businessId)!.pipelineStage,
               priorityLevel: businessMap.get(location.businessId)!.priorityLevel,
               priorityReason: businessMap.get(location.businessId)!.priorityReason,
               aiSummary: businessMap.get(location.businessId)!.aiSummary,
@@ -276,10 +314,7 @@ router.get("/api/gbp/locations", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Erro ao listar locations GBP:", error);
-    return res.status(500).json({
-      ok: false,
-      error: error?.message || "Erro ao listar locations GBP"
-    });
+    return res.status(500).json({ ok: false, error: error?.message || "Erro ao listar locations GBP" });
   }
 });
 
