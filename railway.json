@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "pnpm db:push && node dist/server/_core/index.ts",
+    "startCommand": "node dist/server/_core/index.ts",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
