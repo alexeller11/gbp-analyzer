@@ -52,9 +52,10 @@ export async function refreshBusinessScores(userId: number) {
       isVerified: location.isVerified
     });
 
-    const leadType = business.leadType === "client" || business.leadType === "prospect"
-      ? business.leadType
-      : inferLeadType(score);
+    const leadType =
+      business.leadType === "client" || business.leadType === "prospect"
+        ? business.leadType
+        : inferLeadType(score);
 
     await db
       .update(businesses)
@@ -68,9 +69,7 @@ export async function refreshBusinessScores(userId: number) {
     updated += 1;
   }
 
-  return {
-    updated
-  };
+  return { updated };
 }
 
 export async function getAgencyDashboard(userId: number) {
@@ -110,7 +109,12 @@ export async function getAgencyDashboard(userId: number) {
       phone: business?.phone || null,
       website: business?.website || null,
       score: business?.score || 0,
-      leadType: business?.leadType || "prospect"
+      leadType: business?.leadType || "prospect",
+      pipelineStage: business?.pipelineStage || "new",
+      priorityLevel: business?.priorityLevel || "low",
+      priorityReason: business?.priorityReason || null,
+      aiSummary: business?.aiSummary || null,
+      notes: business?.notes || null
     };
   });
 
@@ -120,6 +124,16 @@ export async function getAgencyDashboard(userId: number) {
   const totalProspects = rows.filter((item) => item.leadType === "prospect").length;
   const totalWithWebsite = rows.filter((item) => !!item.website).length;
   const totalVerified = rows.filter((item) => item.isVerified).length;
+  const highPriority = rows.filter((item) => item.priorityLevel === "high").length;
+
+  const pipelineSummary = {
+    new: rows.filter((item) => item.pipelineStage === "new").length,
+    contacted: rows.filter((item) => item.pipelineStage === "contacted").length,
+    meeting: rows.filter((item) => item.pipelineStage === "meeting").length,
+    proposal: rows.filter((item) => item.pipelineStage === "proposal").length,
+    won: rows.filter((item) => item.pipelineStage === "won").length,
+    lost: rows.filter((item) => item.pipelineStage === "lost").length
+  };
 
   const accountsSummary = allAccounts.map((account) => {
     const accountRows = rows.filter((row) => row.accountId === account.accountId);
@@ -134,15 +148,22 @@ export async function getAgencyDashboard(userId: number) {
       withWebsite: accountRows.filter((item) => !!item.website).length,
       avgScore:
         accountRows.length > 0
-          ? Math.round(
-              accountRows.reduce((sum, item) => sum + item.score, 0) / accountRows.length
-            )
+          ? Math.round(accountRows.reduce((sum, item) => sum + item.score, 0) / accountRows.length)
           : 0
     };
   });
 
-  const topProfiles = [...rows]
-    .sort((a, b) => b.score - a.score)
+  const topProfiles = [...rows].sort((a, b) => b.score - a.score).slice(0, 10);
+
+  const topOpportunities = [...rows]
+    .sort((a, b) => {
+      const priorityOrder = { high: 3, medium: 2, low: 1 };
+      const aPriority = priorityOrder[a.priorityLevel as keyof typeof priorityOrder] || 0;
+      const bPriority = priorityOrder[b.priorityLevel as keyof typeof priorityOrder] || 0;
+
+      if (bPriority !== aPriority) return bPriority - aPriority;
+      return a.score - b.score;
+    })
     .slice(0, 10);
 
   return {
@@ -152,10 +173,13 @@ export async function getAgencyDashboard(userId: number) {
       totalClients,
       totalProspects,
       totalWithWebsite,
-      totalVerified
+      totalVerified,
+      highPriority
     },
+    pipelineSummary,
     accountsSummary,
     topProfiles,
+    topOpportunities,
     rows
   };
 }
