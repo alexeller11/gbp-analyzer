@@ -130,7 +130,6 @@ router.post("/api/gbp/businesses/:businessId/update", async (req, res) => {
         state: payload.state ?? existing.state,
         phone: payload.phone ?? existing.phone,
         website: payload.website ?? existing.website,
-        leadType: payload.leadType ?? existing.leadType,
         pipelineStage: payload.pipelineStage ?? existing.pipelineStage,
         notes: payload.notes ?? existing.notes,
         updatedAt: new Date()
@@ -162,7 +161,6 @@ router.get("/api/gbp/account/:accountId/dashboard", async (req, res) => {
     const requestedAccountId = String(req.params.accountId);
 
     const result = await getAgencyDashboard(userId);
-
     const rows = result.rows.filter((item) => item.accountId === requestedAccountId);
 
     return res.status(200).json({
@@ -184,8 +182,8 @@ router.get("/api/gbp/export.csv", async (req, res) => {
     const header = [
       "empresa",
       "conta",
-      "tipo",
       "pipeline",
+      "status_atendimento",
       "prioridade",
       "score",
       "categoria",
@@ -199,8 +197,8 @@ router.get("/api/gbp/export.csv", async (req, res) => {
     const lines = result.rows.map((row) => [
       row.businessName,
       row.accountDisplayName || "",
-      row.leadType,
       row.pipelineStage,
+      row.serviceStatus,
       row.priorityLevel,
       String(row.score),
       row.primaryCategory || "",
@@ -220,7 +218,7 @@ router.get("/api/gbp/export.csv", async (req, res) => {
       .join("\n");
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", 'attachment; filename="gbp-carteira.csv"');
+    res.setHeader("Content-Disposition", 'attachment; filename="gbp-carteira-clientes.csv"');
     return res.status(200).send(csv);
   } catch (error: any) {
     console.error("Erro ao exportar CSV:", error);
@@ -302,8 +300,8 @@ router.get("/api/gbp/locations", async (req, res) => {
               phone: businessMap.get(location.businessId)!.phone,
               website: businessMap.get(location.businessId)!.website,
               score: businessMap.get(location.businessId)!.score,
-              leadType: businessMap.get(location.businessId)!.leadType,
               pipelineStage: businessMap.get(location.businessId)!.pipelineStage,
+              serviceStatus: businessMap.get(location.businessId)!.serviceStatus,
               priorityLevel: businessMap.get(location.businessId)!.priorityLevel,
               priorityReason: businessMap.get(location.businessId)!.priorityReason,
               aiSummary: businessMap.get(location.businessId)!.aiSummary,
