@@ -21,7 +21,10 @@ function getGoogleImportFunctions() {
   const importAccounts =
     googleImportService.importGoogleBusinessAccounts ||
     defaultExport.importGoogleBusinessAccounts ||
-    defaultExport.importAccounts;
+    defaultExport.importAccounts ||
+    googleImportService.importGoogleBusinessLocations ||
+    defaultExport.importGoogleBusinessLocations ||
+    defaultExport.importLocations;
   const importLocations =
     googleImportService.importGoogleBusinessLocations ||
     defaultExport.importGoogleBusinessLocations ||
@@ -29,12 +32,13 @@ function getGoogleImportFunctions() {
   const syncLocationDetails =
     googleImportService.syncGoogleBusinessLocationDetails ||
     defaultExport.syncGoogleBusinessLocationDetails ||
-    defaultExport.syncLocationDetails;
+    defaultExport.syncLocationDetails ||
+    googleImportService.importGoogleBusinessLocations ||
+    defaultExport.importGoogleBusinessLocations ||
+    defaultExport.importLocations;
 
   if (
-    typeof importAccounts !== "function" ||
-    typeof importLocations !== "function" ||
-    typeof syncLocationDetails !== "function"
+    typeof importLocations !== "function"
   ) {
     const available = Object.keys(googleImportService);
     const availableDefault = Object.keys(defaultExport);
@@ -45,9 +49,10 @@ function getGoogleImportFunctions() {
   }
 
   return {
-    importAccounts,
+    importAccounts: typeof importAccounts === "function" ? importAccounts : importLocations,
     importLocations,
-    syncLocationDetails
+    syncLocationDetails:
+      typeof syncLocationDetails === "function" ? syncLocationDetails : importLocations
   };
 }
 
