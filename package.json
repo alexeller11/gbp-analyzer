@@ -8,8 +8,8 @@
   },
   "scripts": {
     "dev": "tsx watch server/_core/index.ts",
-    "build": "vite build && mkdir -p dist/server/_core dist/server/routes dist/server/auth dist/server/services dist/server/google dist/drizzle && cp server/_core/index.ts dist/server/_core/index.ts && cp server/db.ts dist/server/db.ts && cp server/routes/google-auth.routes.ts dist/server/routes/google-auth.routes.ts && cp server/routes/gbp.routes.ts dist/server/routes/gbp.routes.ts && cp server/auth/session.ts dist/server/auth/session.ts && cp server/services/google-connection.service.ts dist/server/services/google-connection.service.ts && cp server/services/google-import.service.ts dist/server/services/google-import.service.ts && cp server/services/dashboard.service.ts dist/server/services/dashboard.service.ts && cp server/services/insights.service.ts dist/server/services/insights.service.ts && cp server/google/gbp.service.ts dist/server/google/gbp.service.ts && cp drizzle/schema.ts dist/drizzle/schema.ts",
-    "start": "node dist/server/_core/index.ts",
+    "build": "vite build",
+    "start": "tsx server/_core/index.ts",
     "db:push": "drizzle-kit migrate"
   },
   "dependencies": {

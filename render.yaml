@@ -2,10 +2,10 @@ services:
   - type: web
     name: gbp-analyzer
     runtime: node
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: pnpm install --no-frozen-lockfile && pnpm build
+    startCommand: pnpm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: NODE_VERSION
-        value: "20.11.0"
+        value: "22.12.0"
