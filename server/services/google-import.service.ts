@@ -135,6 +135,7 @@ async function fetchLocationDetailsWithMask(
 
 async function fetchLocationDetails(accessToken: string, googleLocationName: string) {
   const masks = [
+    "name,title,storeCode,languageCode,websiteUri,phoneNumbers,storefrontAddress,primaryCategory,categories,metadata,regularHours,specialHours,serviceArea",
     "name,title,storeCode,languageCode,websiteUri,phoneNumbers,storefrontAddress,primaryCategory,categories,metadata",
     "name,title,storeCode,languageCode,websiteUri",
     "name,title"
@@ -318,10 +319,10 @@ export async function importGoogleBusinessLocations(userId: number) {
             userId,
             source: "google_import",
             status: "active",
-            name: title,
-            primaryCategory,
-            city,
-            state,
+            name: title || "Sem título",
+            primaryCategory: primaryCategory || "Categoria não informada",
+            city: city || "Cidade não informada",
+            state: state || "Estado não informado",
             phone,
             website,
             googleLocationKey: googleLocationName,
@@ -335,7 +336,7 @@ export async function importGoogleBusinessLocations(userId: number) {
         const updatedBusiness = await db
           .update(businesses)
           .set({
-            name: title,
+            name: title || business.name || "Sem título",
             primaryCategory: primaryCategory ?? business.primaryCategory,
             city: city ?? business.city,
             state: state ?? business.state,
