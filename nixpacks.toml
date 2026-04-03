@@ -10,4 +10,4 @@ cmds = ["pnpm install --no-frozen-lockfile"]
 cmds = ["pnpm build"]
 
 [start]
-cmd = "pnpm db:push && node dist/server/_core/index.ts"
+cmd = "node dist/server/_core/index.ts"
