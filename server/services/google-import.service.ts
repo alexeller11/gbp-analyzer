@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db.ts";
 import { gbpAccounts, businesses, gbpLocations } from "../../drizzle/schema.ts";
 import { getValidGoogleAccessToken } from "./google-connection.service.ts";
+import { discoverAllAccounts } from "../google/gbp.service.ts";
 
 function extractAccountId(name: string) {
   const parts = name.split("/");
@@ -27,7 +28,7 @@ function parseAddress(profile: any) {
 }
 
 function parsePrimaryCategory(profile: any) {
-  const category = profile?.primaryCategory;
+  const category = profile?.primaryCategory || profile?.categories?.primaryCategory;
   if (!category) return null;
   if (category.displayName) return String(category.displayName);
   if (category.name) return String(category.name);
@@ -134,7 +135,7 @@ async function fetchLocationDetailsWithMask(
 
 async function fetchLocationDetails(accessToken: string, googleLocationName: string) {
   const masks = [
-    "name,title,storeCode,languageCode,websiteUri,phoneNumbers,storefrontAddress,primaryCategory",
+    "name,title,storeCode,languageCode,websiteUri,phoneNumbers,storefrontAddress,primaryCategory,categories,metadata",
     "name,title,storeCode,languageCode,websiteUri",
     "name,title"
   ];
@@ -165,24 +166,7 @@ async function fetchLocationDetails(accessToken: string, googleLocationName: str
 
 export async function importGoogleBusinessAccounts(userId: number) {
   const { accessToken, connection } = await getValidGoogleAccessToken(userId);
-
-  const response = await fetch(
-    "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    }
-  );
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error("Erro ao buscar contas GBP:", data);
-    throw new Error("Falha ao buscar contas do Google Business Profile");
-  }
-
-  const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+  const accounts = await discoverAllAccounts(accessToken);
 
   let imported = 0;
 
@@ -246,6 +230,8 @@ export async function importGoogleBusinessAccounts(userId: number) {
 
 export async function importGoogleBusinessLocations(userId: number) {
   const { accessToken } = await getValidGoogleAccessToken(userId);
+
+  const accountSyncResult = await importGoogleBusinessAccounts(userId);
 
   const accounts = await db.query.gbpAccounts.findMany({
     where: eq(gbpAccounts.userId, userId)
@@ -411,6 +397,8 @@ export async function importGoogleBusinessLocations(userId: number) {
   }
 
   return {
+    accountsDiscovered: accountSyncResult.totalDiscovered,
+    accountsSynced: accountSyncResult.totalStored,
     accountsProcessed,
     locationsImported,
     businessesImported,
