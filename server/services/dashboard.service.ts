@@ -22,10 +22,6 @@ function calculateBusinessScore(params: {
   return score;
 }
 
-function inferLeadType(score: number) {
-  return score >= 40 ? "client" : "prospect";
-}
-
 export async function refreshBusinessScores(userId: number) {
   const allLocations = await db.query.gbpLocations.findMany({
     where: eq(gbpLocations.userId, userId)
@@ -52,16 +48,10 @@ export async function refreshBusinessScores(userId: number) {
       isVerified: location.isVerified
     });
 
-    const leadType =
-      business.leadType === "client" || business.leadType === "prospect"
-        ? business.leadType
-        : inferLeadType(score);
-
     await db
       .update(businesses)
       .set({
         score,
-        leadType,
         updatedAt: new Date()
       })
       .where(eq(businesses.id, business.id));
@@ -109,8 +99,8 @@ export async function getAgencyDashboard(userId: number) {
       phone: business?.phone || null,
       website: business?.website || null,
       score: business?.score || 0,
-      leadType: business?.leadType || "prospect",
-      pipelineStage: business?.pipelineStage || "new",
+      pipelineStage: business?.pipelineStage || "onboarding",
+      serviceStatus: business?.serviceStatus || "active",
       priorityLevel: business?.priorityLevel || "low",
       priorityReason: business?.priorityReason || null,
       aiSummary: business?.aiSummary || null,
@@ -120,19 +110,18 @@ export async function getAgencyDashboard(userId: number) {
 
   const totalProfiles = rows.length;
   const totalAccounts = allAccounts.length;
-  const totalClients = rows.filter((item) => item.leadType === "client").length;
-  const totalProspects = rows.filter((item) => item.leadType === "prospect").length;
   const totalWithWebsite = rows.filter((item) => !!item.website).length;
   const totalVerified = rows.filter((item) => item.isVerified).length;
   const highPriority = rows.filter((item) => item.priorityLevel === "high").length;
+  const urgentProfiles = rows.filter((item) => item.serviceStatus === "urgent").length;
+  const attentionProfiles = rows.filter((item) => item.serviceStatus === "attention").length;
 
   const pipelineSummary = {
-    new: rows.filter((item) => item.pipelineStage === "new").length,
-    contacted: rows.filter((item) => item.pipelineStage === "contacted").length,
-    meeting: rows.filter((item) => item.pipelineStage === "meeting").length,
-    proposal: rows.filter((item) => item.pipelineStage === "proposal").length,
-    won: rows.filter((item) => item.pipelineStage === "won").length,
-    lost: rows.filter((item) => item.pipelineStage === "lost").length
+    onboarding: rows.filter((item) => item.pipelineStage === "onboarding").length,
+    optimization: rows.filter((item) => item.pipelineStage === "optimization").length,
+    monitoring: rows.filter((item) => item.pipelineStage === "monitoring").length,
+    recurring: rows.filter((item) => item.pipelineStage === "recurring").length,
+    completed: rows.filter((item) => item.pipelineStage === "completed").length
   };
 
   const accountsSummary = allAccounts.map((account) => {
@@ -143,9 +132,9 @@ export async function getAgencyDashboard(userId: number) {
       accountDisplayName: account.accountDisplayName,
       accountType: account.accountType,
       profiles: accountRows.length,
-      clients: accountRows.filter((item) => item.leadType === "client").length,
-      prospects: accountRows.filter((item) => item.leadType === "prospect").length,
       withWebsite: accountRows.filter((item) => !!item.website).length,
+      urgent: accountRows.filter((item) => item.serviceStatus === "urgent").length,
+      attention: accountRows.filter((item) => item.serviceStatus === "attention").length,
       avgScore:
         accountRows.length > 0
           ? Math.round(accountRows.reduce((sum, item) => sum + item.score, 0) / accountRows.length)
@@ -170,11 +159,11 @@ export async function getAgencyDashboard(userId: number) {
     summary: {
       totalProfiles,
       totalAccounts,
-      totalClients,
-      totalProspects,
       totalWithWebsite,
       totalVerified,
-      highPriority
+      highPriority,
+      urgentProfiles,
+      attentionProfiles
     },
     pipelineSummary,
     accountsSummary,
