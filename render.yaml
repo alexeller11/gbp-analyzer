@@ -3,7 +3,7 @@ services:
     name: gbp-analyzer
     runtime: node
     buildCommand: npm install && npm run build
-    startCommand: npm run db:push && npm start
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
