@@ -1,3 +1,4 @@
+import cors from "cors";
 import express from "express";
 import cookieParser from "cookie-parser";
 import path from "node:path";
@@ -8,6 +9,7 @@ import googleAuthRoutes from "../routes/google-auth.routes.ts";
 import gbpRoutes from "../routes/gbp.routes.ts";
 
 const app = express();
+app.use(cors());
 const PORT = Number(process.env.PORT || 8080);
 
 const __filename = fileURLToPath(import.meta.url);
