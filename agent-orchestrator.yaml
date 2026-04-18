@@ -1,0 +1,33 @@
+# Agent Orchestrator — gbp-analyzer
+# https://github.com/ComposioHQ/agent-orchestrator
+
+port: 3001
+
+defaults:
+  runtime: tmux
+  agent: claude-code
+  workspace: worktree
+  notifiers: [desktop]
+
+projects:
+  gbp-analyzer:
+    repo: alexeller11/gbp-analyzer
+    path: ~/gbp-analyzer
+    defaultBranch: main
+    sessionPrefix: gbp
+
+reactions:
+  ci-failed:
+    auto: true
+    action: send-to-agent
+    retries: 2
+  changes-requested:
+    auto: true
+    action: send-to-agent
+    escalateAfter: 30m
+  approved-and-green:
+    auto: false
+    action: notify
+
+power:
+  preventIdleSleep: true
